@@ -79,13 +79,13 @@ Two complementary benchmarks:
 
 ```python
 # Insert phase: SQLAlchemy bulk_save_objects
-session.bulk_save_objects([SemanticData(**row) for row in chunk])
+session.bulk_save_objects([BenchRow(**row) for row in chunk])
 session.commit()
 
 # Upsert phase: SQLAlchemy insert().on_conflict_do_update()
-stmt = insert(SemanticData).values(chunk)
+stmt = insert(BenchRow).values(chunk)
 stmt = stmt.on_conflict_do_update(
-    index_elements=["robot_id", "site_id", "surface_id", "cell_id"],
+    index_elements=["tenant_id", "entity_id", "sub_entity_id", "bucket_index"],
     set_={col: stmt.excluded[col] for col in update_cols}
 )
 session.execute(stmt)
@@ -99,7 +99,7 @@ session.commit()
 raw_conn = session.connection().connection.dbapi_connection
 cursor = raw_conn.cursor()
 cursor.executemany(
-    "INSERT INTO semantic_data (semantic_data_id, robot_id, ...) VALUES (?, ?, ...)",
+    "INSERT INTO bench_rows (row_id, tenant_id, entity_id, ...) VALUES (?, ?, ?, ...)",
     rows_as_tuples
 )
 raw_conn.commit()
@@ -323,10 +323,10 @@ The ORM path is fine for most operations. Bypass it when:
 Keep your ORM for reads, validation, and normal CRUD. Add a raw SQL fast-path for bulk operations:
 
 ```python
-class SemanticDataRepository:
-    def create(self, data: dict) -> SemanticData:
+class BenchRepository:
+    def create(self, data: dict) -> BenchRow:
         """Normal ORM path for single creates."""
-        obj = SemanticData(**data)
+        obj = BenchRow(**data)
         self.db.add(obj)
         self.db.flush()
         return obj
@@ -490,6 +490,6 @@ Zero errors across 110 million rows, 11 configurations, 2 methods, 2 scales. Que
 
 ## About
 
-This benchmark was produced while optimizing the write pipeline for an edge robotics application running SQLite on NVIDIA Orin hardware. The database ingests semantic mapping data from autonomous wall-finishing robots — millions of spatial data points per job. The ORM ceiling was the forcing function that led to the turbo bulk methods and this analysis.
+This benchmark was produced while optimizing a high-throughput spatial data ingestion pipeline running SQLite on edge hardware. The database ingested millions of structured measurements per job, and the ORM ceiling was the forcing function that led to the raw fast-path methods and this analysis.
 
 **Hardware context matters.** Our NVMe results will differ from EBS, spinning disk, or eMMC. The relative findings (ORM overhead ratio, config irrelevance, chunk size vs latency) should hold across storage tiers, but absolute numbers will vary.

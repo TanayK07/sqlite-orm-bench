@@ -42,7 +42,7 @@ python -m sqlite_bench.scale_benchmark --scales 3M,5M,10M --configs all
 ## PR checklist
 
 - [ ] Smoke test passes locally
-- [ ] No new wall-finishing or project-specific references
+- [ ] No domain-specific references (keep the benchmark schema generic)
 - [ ] Type hints use PEP 604 syntax
 - [ ] No `print()` outside of CLI entry points (use the existing checkpoint printing helpers)
 - [ ] If adding a new config: include rationale in PR description
