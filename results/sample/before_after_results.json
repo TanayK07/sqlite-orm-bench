@@ -1,0 +1,89 @@
+{
+  "system_info": {
+    "cpu_count": 16,
+    "cpu_physical": 8,
+    "ram_total_gb": 23.2,
+    "python_pid": 6538,
+    "storage_devices": "loop0       4K    0 \nloop1    63.8M    0 \nloop2    63.8M    0 \nloop3      74M    0 \nloop4      74M    0 \nloop5    66.8M    0 \nloop6    66.8M    0 \nloop7   252.8M    0 \nloop8   246.6M    0 \nloop9   349.7M    0 \nloop10  505.1M    0 \nloop11  531.4M    0 \nloop12  606.1M    0 \nloop13  341.3M    0 \nloop14  341.6M    0 \nloop15   91.7M    0 \nloop16    395M    0 \nloop17      9M    0 \nloop18      9M    0 \nloop19  127.8M    0 \nloop20  131.6M    0 \nloop21   12.9M    0 \nloop22   12.2M    0 \nloop23   48.4M    0 \nloop24   49.3M    0 \nloop25    576K    0 \nloop26    580K    0 \nloop27      2M    0 \nnvme0n1 931.5G    0 Samsung SSD 990 EVO Plus 1TB"
+  },
+  "generated_at": "2026-05-23T15:35:51.110814+00:00",
+  "total_runtime_sec": 13581.9,
+  "checkpoints": [
+    10000000,
+    50000000
+  ],
+  "results": [
+    {
+      "mode": "turbo",
+      "checkpoint_rows": 10000000,
+      "cumulative_time_sec": 113.77,
+      "cumulative_rows_per_sec": 87892.9,
+      "segment_rows": 10000000,
+      "segment_time_sec": 113.77,
+      "segment_rows_per_sec": 87892.9,
+      "batch_count": 200,
+      "batch_p50_ms": 424.4,
+      "batch_p95_ms": 469.9,
+      "batch_p99_ms": 478.3,
+      "batch_avg_ms": 423.7,
+      "cumulative_p50_ms": 424.4,
+      "cumulative_p99_ms": 478.3,
+      "peak_rss_mb": 154.8,
+      "db_size_mb": 3851.0
+    },
+    {
+      "mode": "turbo",
+      "checkpoint_rows": 50000000,
+      "cumulative_time_sec": 760.54,
+      "cumulative_rows_per_sec": 65742.5,
+      "segment_rows": 40000000,
+      "segment_time_sec": 646.77,
+      "segment_rows_per_sec": 61845.9,
+      "batch_count": 800,
+      "batch_p50_ms": 651.6,
+      "batch_p95_ms": 830.0,
+      "batch_p99_ms": 853.0,
+      "batch_avg_ms": 658.5,
+      "cumulative_p50_ms": 603.5,
+      "cumulative_p99_ms": 852.6,
+      "peak_rss_mb": 187.8,
+      "db_size_mb": 19493.7
+    },
+    {
+      "mode": "orm",
+      "checkpoint_rows": 10000000,
+      "cumulative_time_sec": 2705.24,
+      "cumulative_rows_per_sec": 3696.5,
+      "segment_rows": 10000000,
+      "segment_time_sec": 2705.24,
+      "segment_rows_per_sec": 3696.5,
+      "batch_count": 2000,
+      "batch_p50_ms": 1319.8,
+      "batch_p95_ms": 1424.2,
+      "batch_p99_ms": 1492.4,
+      "batch_avg_ms": 1323.5,
+      "cumulative_p50_ms": 1319.8,
+      "cumulative_p99_ms": 1492.4,
+      "peak_rss_mb": 176.9,
+      "db_size_mb": 3518.9
+    },
+    {
+      "mode": "orm",
+      "checkpoint_rows": 50000000,
+      "cumulative_time_sec": 13580.7,
+      "cumulative_rows_per_sec": 3681.7,
+      "segment_rows": 40000000,
+      "segment_time_sec": 10875.46,
+      "segment_rows_per_sec": 3678.0,
+      "batch_count": 8000,
+      "batch_p50_ms": 1323.7,
+      "batch_p95_ms": 1434.4,
+      "batch_p99_ms": 1563.2,
+      "batch_avg_ms": 1329.9,
+      "cumulative_p50_ms": 1323.0,
+      "cumulative_p99_ms": 1536.9,
+      "peak_rss_mb": 176.9,
+      "db_size_mb": 17789.1
+    }
+  ]
+}

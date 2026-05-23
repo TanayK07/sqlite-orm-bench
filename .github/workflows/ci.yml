@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Import check
+        run: |
+          python -c "from sqlite_bench import scale_benchmark, before_after, paths, engine, schema, configs, data_generator, monitor, results, report"
+
+      - name: Smoke test before_after (10K rows)
+        run: |
+          python -m sqlite_bench.before_after --scales 10K --mode both --output-dir /tmp/smoke
+
+      - name: Smoke test scale_benchmark (3 presets × 5K)
+        run: |
+          python -m sqlite_bench.scale_benchmark --scales 5K --configs presets --output-dir /tmp/smoke_scale
+
+      - name: Verify results JSON
+        run: |
+          python -c "import json; d=json.load(open('/tmp/smoke/results.json')); assert len(d['results'])>=2"
+          python -c "import json; d=json.load(open('/tmp/smoke_scale/results.json')); assert len(d['results'])>=3"

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQLite Before/After Benchmark — ORM vs Turbo</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; padding: 24px; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #58a6ff; }
+  h2 { font-size: 20px; margin: 32px 0 16px; color: #c9d1d9; border-bottom: 1px solid #30363d; padding-bottom: 8px; }
+  .subtitle { color: #8b949e; margin-bottom: 24px; }
+  .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin: 24px 0; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; text-align: center; }
+  .card-value { font-size: 32px; font-weight: bold; color: #58a6ff; }
+  .card-label { font-size: 13px; color: #8b949e; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; background: #161b22; border-radius: 8px; overflow: hidden; }
+  th { background: #21262d; padding: 10px 12px; text-align: left; font-size: 13px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 10px 12px; border-top: 1px solid #21262d; font-size: 14px; }
+  tr:hover td { background: #1c2128; }
+  .speedup { color: #3fb950; font-weight: bold; font-size: 16px; }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 24px 0; }
+  .chart-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+  .chart-container h3 { font-size: 15px; color: #c9d1d9; margin-bottom: 12px; }
+  canvas { max-height: 300px; }
+  .config-section { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .config-box { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; }
+  .config-box h3 { color: #f78166; margin-bottom: 8px; }
+  .config-box.after h3 { color: #3fb950; }
+  .config-item { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+  .config-item .label { color: #8b949e; }
+  @media (max-width: 768px) { .chart-grid, .config-section { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>SQLite Before/After Benchmark</h1>
+<p class="subtitle">ORM (bulk_save_objects + on_conflict) vs Turbo (raw sqlite3 executemany) — 2026-05-23T15:35:51.110814+00:00</p>
+
+
+        <div class="summary-cards">
+            <div class="card">
+                <div class="card-value">17.9x</div>
+                <div class="card-label">Throughput Speedup</div>
+            </div>
+            <div class="card">
+                <div class="card-value">94%</div>
+                <div class="card-label">Time Saved</div>
+            </div>
+            <div class="card">
+                <div class="card-value">3,682</div>
+                <div class="card-label">ORM rows/s</div>
+            </div>
+            <div class="card">
+                <div class="card-value">65,742</div>
+                <div class="card-label">Turbo rows/s</div>
+            </div>
+            <div class="card">
+                <div class="card-value">226m</div>
+                <div class="card-label">ORM Time (50M)</div>
+            </div>
+            <div class="card">
+                <div class="card-value">12.7m</div>
+                <div class="card-label">Turbo Time (50M)</div>
+            </div>
+        </div>
+
+<h2>Comparison Table</h2>
+<table>
+<tr>
+  <th>Scale</th>
+  <th>ORM r/s</th><th>Turbo r/s</th><th>Speedup</th>
+  <th>ORM Time</th><th>Turbo Time</th>
+  <th>ORM p99</th><th>Turbo p99</th>
+  <th>ORM DB</th><th>Turbo DB</th>
+</tr>
+
+        <tr>
+            <td>10M</td>
+            <td>3,696 r/s</td>
+            <td>87,893 r/s</td>
+            <td class="speedup">23.8x</td>
+            <td>2,705s (45.1m)</td>
+            <td>114s (1.9m)</td>
+            <td>1,492ms</td>
+            <td>478ms</td>
+            <td>3,519MB</td>
+            <td>3,851MB</td>
+        </tr>
+        <tr>
+            <td>50M</td>
+            <td>3,682 r/s</td>
+            <td>65,742 r/s</td>
+            <td class="speedup">17.9x</td>
+            <td>13,581s (226.3m)</td>
+            <td>761s (12.7m)</td>
+            <td>1,563ms</td>
+            <td>853ms</td>
+            <td>17,789MB</td>
+            <td>19,494MB</td>
+        </tr>
+</table>
+
+<div class="chart-grid">
+  <div class="chart-container">
+    <h3>Throughput (rows/s)</h3>
+    <canvas id="throughputChart"></canvas>
+  </div>
+  <div class="chart-container">
+    <h3>Total Time (minutes)</h3>
+    <canvas id="timeChart"></canvas>
+  </div>
+  <div class="chart-container">
+    <h3>p99 Batch Latency (ms)</h3>
+    <canvas id="latencyChart"></canvas>
+  </div>
+  <div class="chart-container">
+    <h3>Speedup Factor</h3>
+    <canvas id="speedupChart"></canvas>
+  </div>
+</div>
+
+<h2>Configuration Comparison</h2>
+<div class="config-section">
+  <div class="config-box">
+    <h3>BEFORE (ORM — Production)</h3>
+    <div class="config-item"><span class="label">Pool</span><span>StaticPool</span></div>
+    <div class="config-item"><span class="label">Insert Method</span><span>bulk_save_objects</span></div>
+    <div class="config-item"><span class="label">Upsert Method</span><span>SQLAlchemy on_conflict_do_update</span></div>
+    <div class="config-item"><span class="label">Chunk Size</span><span>5,000</span></div>
+    <div class="config-item"><span class="label">busy_timeout</span><span>5,000ms</span></div>
+    <div class="config-item"><span class="label">cache_size</span><span>-4096</span></div>
+    <div class="config-item"><span class="label">synchronous</span><span>NORMAL</span></div>
+  </div>
+  <div class="config-box after">
+    <h3>AFTER (Turbo — New Branch)</h3>
+    <div class="config-item"><span class="label">Pool</span><span>QueuePool (5+5)</span></div>
+    <div class="config-item"><span class="label">Insert Method</span><span>sqlite3.executemany</span></div>
+    <div class="config-item"><span class="label">Upsert Method</span><span>sqlite3.executemany ON CONFLICT</span></div>
+    <div class="config-item"><span class="label">Chunk Size</span><span>50,000</span></div>
+    <div class="config-item"><span class="label">busy_timeout</span><span>30,000ms</span></div>
+    <div class="config-item"><span class="label">cache_size</span><span>-4096</span></div>
+    <div class="config-item"><span class="label">synchronous</span><span>NORMAL</span></div>
+  </div>
+</div>
+
+<h2>System Info</h2>
+<table><tr><td>cpu_count</td><td>16</td></tr><tr><td>cpu_physical</td><td>8</td></tr><tr><td>ram_total_gb</td><td>23.2</td></tr><tr><td>python_pid</td><td>6538</td></tr></table>
+
+<script>
+const labels = ["10M", "50M"];
+const chartDefaults = {
+  responsive: true,
+  plugins: { legend: { labels: { color: '#c9d1d9' } } },
+  scales: {
+    x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } },
+    y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }
+  }
+};
+
+new Chart(document.getElementById('throughputChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [
+      { label: 'ORM', data: [3696.5, 3681.7], backgroundColor: '#f7816688', borderColor: '#f78166', borderWidth: 1 },
+      { label: 'Turbo', data: [87892.9, 65742.5], backgroundColor: '#3fb95088', borderColor: '#3fb950', borderWidth: 1 },
+    ]
+  },
+  options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, title: { display: false } } }
+});
+
+new Chart(document.getElementById('timeChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [
+      { label: 'ORM (min)', data: [45.1, 226.3], backgroundColor: '#f7816688', borderColor: '#f78166', borderWidth: 1 },
+      { label: 'Turbo (min)', data: [1.9, 12.7], backgroundColor: '#3fb95088', borderColor: '#3fb950', borderWidth: 1 },
+    ]
+  },
+  options: chartDefaults
+});
+
+new Chart(document.getElementById('latencyChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      { label: 'ORM p99', data: [1492.4, 1563.2], borderColor: '#f78166', tension: 0.3, fill: false },
+      { label: 'Turbo p99', data: [478.3, 853.0], borderColor: '#3fb950', tension: 0.3, fill: false },
+    ]
+  },
+  options: chartDefaults
+});
+
+// Speedup chart
+const ormData = [3696.5, 3681.7];
+const turboData = [87892.9, 65742.5];
+const speedupData = labels.map((_, i) => (ormData[i] && turboData[i]) ? Math.round(turboData[i] / ormData[i] * 10) / 10 : null);
+new Chart(document.getElementById('speedupChart'), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [{ label: 'Speedup (x)', data: speedupData, backgroundColor: '#58a6ff88', borderColor: '#58a6ff', borderWidth: 1 }]
+  },
+  options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, annotation: { } } }
+});
+</script>
+</body>
+</html>

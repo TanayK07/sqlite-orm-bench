@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQLite Benchmark Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root {
+    --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --muted: #64748b;
+    --border: #e2e8f0; --accent: #3b82f6; --success: #22c55e;
+    --warning: #f59e0b; --danger: #ef4444;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: var(--bg); color: var(--text); line-height: 1.6; }
+.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+h2 { font-size: 22px; font-weight: 600; margin: 32px 0 16px; padding-bottom: 8px;
+     border-bottom: 2px solid var(--accent); }
+h3 { font-size: 18px; font-weight: 600; margin: 20px 0 12px; }
+.subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+             gap: 16px; margin-bottom: 24px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+        padding: 20px; }
+.card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+               color: var(--muted); margin-bottom: 4px; }
+.card .value { font-size: 28px; font-weight: 700; }
+.card .detail { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.chart-container { background: var(--card); border: 1px solid var(--border);
+                   border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+@media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
+canvas { max-height: 400px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 10px 12px; text-align: right; border-bottom: 1px solid var(--border); }
+th { background: #f1f5f9; font-weight: 600; text-transform: uppercase; font-size: 11px;
+     letter-spacing: 0.05em; color: var(--muted); position: sticky; top: 0; }
+td:first-child, th:first-child { text-align: left; }
+tr:hover td { background: #f8fafc; }
+.table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+              overflow-x: auto; margin-bottom: 24px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px;
+         font-weight: 600; }
+.badge-success { background: #dcfce7; color: #166534; }
+.badge-warning { background: #fef3c7; color: #92400e; }
+.badge-danger { background: #fee2e2; color: #991b1b; }
+.findings { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+            padding: 20px; margin-bottom: 24px; }
+.findings li { margin-bottom: 8px; }
+.config-tag { display: inline-block; background: #eff6ff; color: #1d4ed8; padding: 1px 6px;
+              border-radius: 4px; font-size: 12px; font-weight: 600; font-family: monospace; }
+.header-bar { display: flex; justify-content: space-between; align-items: flex-start;
+              flex-wrap: wrap; margin-bottom: 24px; }
+.sys-info { font-size: 12px; color: var(--muted); text-align: right; }
+.sys-info span { display: block; }
+.perf-bar { height: 6px; border-radius: 3px; background: var(--border); margin-top: 6px; }
+.perf-fill { height: 100%; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header-bar">
+<div>
+<h1>SQLite Benchmark Report</h1>
+<div class="subtitle">Generated 2026-05-23 17:28:21 &mdash;
+11 configs &times; 3 scale(s) &mdash;
+198M total rows inserted &mdash; runtime 5h 38m</div>
+</div>
+<div class="sys-info">
+<span><strong>CPU:</strong> 16 cores</span>
+<span><strong>RAM:</strong> 23.2 GB</span>
+<span><strong>Storage:</strong> loop0       4K    0 
+loop1    63.8M    0 
+loop2    63.8M    </span>
+</div>
+</div>
+<div class="card-grid">
+<div class="card">
+<div class="label">Best Throughput</div>
+<div class="value">4K/s</div>
+<div class="detail"><span class="config-tag">chunk_1000</span>
+at 3M rows</div>
+</div>
+<div class="card">
+<div class="label">Lowest Batch P99</div>
+<div class="value">309ms</div>
+<div class="detail"><span class="config-tag">chunk_1000</span>
+at 5M rows</div>
+</div>
+<div class="card">
+<div class="label">Best at Max Scale (10M)</div>
+<div class="value">4K/s</div>
+<div class="detail"><span class="config-tag">chunk_1000</span></div>
+</div>
+<div class="card">
+<div class="label">Max Scale Tested</div>
+<div class="value">10M</div>
+<div class="detail">11 configs tested</div>
+</div>
+<div class="card">
+<div class="label">Error Status</div>
+<div class="value"><span class="badge badge-success">Zero errors</span></div>
+<div class="detail">Across all runs</div>
+</div>
+</div>
+<h2>Key Findings</h2>
+<div class="findings"><ul><li>At <strong>10M</strong> rows, <span class='config-tag'>chunk_1000</span> leads at <strong>3821 rows/s</strong>, while <span class='config-tag'>chunk_50000</span> trails at 3045 rows/s (20% slower).</li>
+<li><span class='badge badge-success'>Zero errors</span> across all configs and scales &mdash; QueuePool fix validated.</li></ul></div>
+<h2>Throughput Overview</h2>
+<div class="chart-row">
+<div class="chart-container"><canvas id="throughputChart"></canvas></div>
+<div class="chart-container"><canvas id="scalingChart"></canvas></div>
+</div>
+<h2>Latency Analysis</h2>
+<div class="chart-row">
+<div class="chart-container"><canvas id="latencyChart"></canvas></div>
+<div class="chart-container"><canvas id="latencyScalingChart"></canvas></div>
+</div>
+<h2>Resource Usage</h2>
+<div class="chart-row">
+<div class="chart-container"><canvas id="rssChart"></canvas></div>
+<div class="chart-container"><canvas id="dbSizeChart"></canvas></div>
+</div>
+<h2>Configuration Details</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Config</th><th>Chunk Size</th><th>Synchronous</th>
+<th>Cache</th><th>Pool Size</th><th>mmap</th><th>Busy Timeout</th></tr></thead>
+<tbody><tr>
+<td><span class="config-tag">aggressive</span></td>
+<td>25000</td>
+<td>OFF</td>
+<td>256K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">baseline</span></td>
+<td>5000</td>
+<td>NORMAL</td>
+<td>4K KB</td>
+<td>5</td>
+<td>0 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>1000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>10000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>25000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>5000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>50000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">optimized</span></td>
+<td>10000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">pool_3</span></td>
+<td>10000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>3</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">pool_5</span></td>
+<td>10000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>5</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr><tr>
+<td><span class="config-tag">pool_8</span></td>
+<td>10000</td>
+<td>NORMAL</td>
+<td>64K KB</td>
+<td>8</td>
+<td>256 MB</td>
+<td>10000ms</td>
+</tr></tbody>
+</table></div>
+<h2>Throughput Results</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Scale</th><th>Config</th><th>Cumulative rows/s</th>
+<th>Segment rows/s</th><th>Time</th><th>Batches</th><th>Errors</th></tr></thead>
+<tbody><tr style="font-weight:600">
+<td>3M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>3,871</td>
+<td>3,871</td>
+<td>12m 54s</td>
+<td>3000</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>3,760</td>
+<td>3,760</td>
+<td>13m 17s</td>
+<td>600</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>3,734</td>
+<td>3,734</td>
+<td>13m 23s</td>
+<td>600</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>3,640</td>
+<td>3,640</td>
+<td>13m 44s</td>
+<td>300</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>3,640</td>
+<td>3,640</td>
+<td>13m 44s</td>
+<td>300</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>3,598</td>
+<td>3,598</td>
+<td>13m 53s</td>
+<td>300</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>3,570</td>
+<td>3,570</td>
+<td>14m 0s</td>
+<td>300</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>3,472</td>
+<td>3,472</td>
+<td>14m 23s</td>
+<td>300</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>3,384</td>
+<td>3,384</td>
+<td>14m 46s</td>
+<td>120</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>3,232</td>
+<td>3,232</td>
+<td>15m 28s</td>
+<td>120</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>2,966</td>
+<td>2,966</td>
+<td>16m 51s</td>
+<td>60</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr style="font-weight:600">
+<td>5M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>3,854</td>
+<td>3,828</td>
+<td>21m 37s</td>
+<td>2000</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>3,761</td>
+<td>3,762</td>
+<td>22m 9s</td>
+<td>400</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>3,715</td>
+<td>3,686</td>
+<td>22m 25s</td>
+<td>400</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>3,625</td>
+<td>3,604</td>
+<td>22m 59s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>3,605</td>
+<td>3,553</td>
+<td>23m 7s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>3,588</td>
+<td>3,571</td>
+<td>23m 13s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>3,577</td>
+<td>3,588</td>
+<td>23m 17s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>3,463</td>
+<td>3,448</td>
+<td>24m 3s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>3,349</td>
+<td>3,298</td>
+<td>24m 53s</td>
+<td>80</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>3,219</td>
+<td>3,198</td>
+<td>25m 53s</td>
+<td>80</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>3,009</td>
+<td>3,076</td>
+<td>27m 41s</td>
+<td>40</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr style="font-weight:600">
+<td>10M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>3,821</td>
+<td>3,789</td>
+<td>43m 36s</td>
+<td>5000</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>3,802</td>
+<td>3,844</td>
+<td>43m 50s</td>
+<td>1000</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>3,673</td>
+<td>3,631</td>
+<td>45m 22s</td>
+<td>1000</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>3,621</td>
+<td>3,617</td>
+<td>46m 1s</td>
+<td>500</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>3,576</td>
+<td>3,549</td>
+<td>46m 36s</td>
+<td>500</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>3,574</td>
+<td>3,571</td>
+<td>46m 37s</td>
+<td>500</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>3,573</td>
+<td>3,558</td>
+<td>46m 39s</td>
+<td>500</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>3,445</td>
+<td>3,427</td>
+<td>48m 22s</td>
+<td>500</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>3,262</td>
+<td>3,179</td>
+<td>51m 5s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>3,243</td>
+<td>3,268</td>
+<td>51m 23s</td>
+<td>200</td>
+<td><span class="badge badge-success">0</span></td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>3,045</td>
+<td>3,081</td>
+<td>54m 44s</td>
+<td>100</td>
+<td><span class="badge badge-success">0</span></td>
+</tr></tbody>
+</table></div>
+<h2>Latency Details</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Scale</th><th>Config</th><th>Batch P50</th><th>Batch P95</th>
+<th>Batch P99</th><th>Batch Min</th><th>Batch Max</th>
+<th>Read P50</th><th>Read P99</th></tr></thead>
+<tbody><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>254</td>
+<td>287</td>
+<td>312</td>
+<td>40</td>
+<td>394</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>1,317</td>
+<td>1,377</td>
+<td>1,403</td>
+<td>299</td>
+<td>1,471</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>1,318</td>
+<td>1,411</td>
+<td>1,463</td>
+<td>151</td>
+<td>1,524</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>2,722</td>
+<td>2,800</td>
+<td>2,887</td>
+<td>189</td>
+<td>2,920</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>2,752</td>
+<td>2,865</td>
+<td>2,904</td>
+<td>191</td>
+<td>2,958</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>2,775</td>
+<td>2,912</td>
+<td>3,005</td>
+<td>206</td>
+<td>3,055</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>2,850</td>
+<td>2,974</td>
+<td>3,039</td>
+<td>184</td>
+<td>3,109</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>2,713</td>
+<td>2,859</td>
+<td>3,039</td>
+<td>518</td>
+<td>3,400</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>7,376</td>
+<td>7,498</td>
+<td>7,529</td>
+<td>460</td>
+<td>7,545</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>7,649</td>
+<td>8,465</td>
+<td>8,764</td>
+<td>996</td>
+<td>8,811</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>16,495</td>
+<td>20,481</td>
+<td>20,647</td>
+<td>1,174</td>
+<td>20,754</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>257</td>
+<td>290</td>
+<td>309</td>
+<td>223</td>
+<td>380</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>1,309</td>
+<td>1,393</td>
+<td>1,429</td>
+<td>1,182</td>
+<td>1,483</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>1,335</td>
+<td>1,413</td>
+<td>1,437</td>
+<td>1,226</td>
+<td>1,500</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>2,743</td>
+<td>2,823</td>
+<td>2,847</td>
+<td>2,678</td>
+<td>2,851</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>2,737</td>
+<td>2,842</td>
+<td>2,918</td>
+<td>2,646</td>
+<td>2,970</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>2,766</td>
+<td>2,861</td>
+<td>2,978</td>
+<td>2,673</td>
+<td>2,995</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>2,775</td>
+<td>2,928</td>
+<td>2,989</td>
+<td>2,628</td>
+<td>2,994</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>2,865</td>
+<td>2,983</td>
+<td>3,014</td>
+<td>2,735</td>
+<td>3,021</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>7,498</td>
+<td>7,660</td>
+<td>7,710</td>
+<td>7,304</td>
+<td>7,863</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>7,716</td>
+<td>8,003</td>
+<td>8,138</td>
+<td>7,488</td>
+<td>8,248</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>16,077</td>
+<td>16,386</td>
+<td>16,492</td>
+<td>15,832</td>
+<td>16,522</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>259</td>
+<td>297</td>
+<td>315</td>
+<td>219</td>
+<td>365</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>1,287</td>
+<td>1,349</td>
+<td>1,410</td>
+<td>1,179</td>
+<td>1,476</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>1,350</td>
+<td>1,458</td>
+<td>1,536</td>
+<td>1,234</td>
+<td>1,658</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>2,729</td>
+<td>2,810</td>
+<td>2,837</td>
+<td>2,633</td>
+<td>2,848</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>2,778</td>
+<td>2,860</td>
+<td>2,903</td>
+<td>2,667</td>
+<td>3,142</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>2,772</td>
+<td>2,886</td>
+<td>2,957</td>
+<td>2,667</td>
+<td>3,010</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>2,763</td>
+<td>2,859</td>
+<td>2,960</td>
+<td>2,659</td>
+<td>2,994</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>2,863</td>
+<td>3,038</td>
+<td>3,391</td>
+<td>2,674</td>
+<td>4,087</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>7,556</td>
+<td>7,768</td>
+<td>7,912</td>
+<td>7,256</td>
+<td>9,302</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>7,720</td>
+<td>8,280</td>
+<td>8,604</td>
+<td>7,255</td>
+<td>8,946</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>16,048</td>
+<td>16,486</td>
+<td>16,731</td>
+<td>15,477</td>
+<td>16,923</td>
+<td>0.0</td>
+<td>0.0</td>
+</tr></tbody>
+</table></div>
+<h2>Resource &amp; Error Details</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Scale</th><th>Config</th><th>Peak RSS (MB)</th><th>DB Size (MB)</th>
+<th>Max WAL (MB)</th><th>Total Errors</th><th>Interface Errs</th>
+<th>Lock Errs</th></tr></thead>
+<tbody><tr>
+<td>3M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>580</td>
+<td>1,059</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>194</td>
+<td>1,059</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>790</td>
+<td>1,056</td>
+<td>4.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>610</td>
+<td>1,057</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>613</td>
+<td>1,059</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>510</td>
+<td>1,059</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>631</td>
+<td>1,058</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>611</td>
+<td>1,057</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>611</td>
+<td>1,057</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>609</td>
+<td>1,057</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>3M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>609</td>
+<td>1,057</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>594</td>
+<td>1,759</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>195</td>
+<td>1,760</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>790</td>
+<td>1,756</td>
+<td>4.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>610</td>
+<td>1,758</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>614</td>
+<td>1,759</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>508</td>
+<td>1,760</td>
+<td>6.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>652</td>
+<td>1,759</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>611</td>
+<td>1,758</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>611</td>
+<td>1,758</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>609</td>
+<td>1,758</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>5M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>597</td>
+<td>1,758</td>
+<td>6.6</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">aggressive</span></td>
+<td>595</td>
+<td>3,516</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">baseline</span></td>
+<td>195</td>
+<td>3,519</td>
+<td>6.7</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_1000</span></td>
+<td>790</td>
+<td>3,513</td>
+<td>4.5</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_10000</span></td>
+<td>610</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_25000</span></td>
+<td>629</td>
+<td>3,516</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_5000</span></td>
+<td>511</td>
+<td>3,519</td>
+<td>6.7</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">chunk_50000</span></td>
+<td>633</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">optimized</span></td>
+<td>611</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_3</span></td>
+<td>610</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_5</span></td>
+<td>609</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr><tr>
+<td>10M</td>
+<td><span class="config-tag">pool_8</span></td>
+<td>606</td>
+<td>3,515</td>
+<td>6.8</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr></tbody>
+</table></div>
+</div>
+<script>
+const RESULTS = [{"config_name": "baseline", "checkpoint_rows": 3000000, "cumulative_time_sec": 797.78, "cumulative_rows_per_sec": 3760.4, "segment_rows": 3000000, "segment_time_sec": 797.78, "segment_rows_per_sec": 3760.4, "batch_count": 600, "batch_p50_ms": 1316.8, "batch_p95_ms": 1376.7, "batch_p99_ms": 1403.1, "batch_min_ms": 298.9, "batch_max_ms": 1471.1, "batch_avg_ms": 1302.4, "cumulative_batch_p50_ms": 1316.8, "cumulative_batch_p99_ms": 1403.1, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.45, "peak_rss_mb": 193.7, "db_size_mb": 1059.1, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "baseline", "checkpoint_rows": 5000000, "cumulative_time_sec": 1329.4, "cumulative_rows_per_sec": 3761.1, "segment_rows": 2000000, "segment_time_sec": 531.62, "segment_rows_per_sec": 3762.1, "batch_count": 400, "batch_p50_ms": 1308.6, "batch_p95_ms": 1393.1, "batch_p99_ms": 1429.4, "batch_min_ms": 1181.7, "batch_max_ms": 1483.3, "batch_avg_ms": 1302.3, "cumulative_batch_p50_ms": 1314.0, "cumulative_batch_p99_ms": 1418.4, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.53, "peak_rss_mb": 194.7, "db_size_mb": 1760.5, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "baseline", "checkpoint_rows": 10000000, "cumulative_time_sec": 2630.11, "cumulative_rows_per_sec": 3802.1, "segment_rows": 5000000, "segment_time_sec": 1300.7, "segment_rows_per_sec": 3844.1, "batch_count": 1000, "batch_p50_ms": 1286.6, "batch_p95_ms": 1348.6, "batch_p99_ms": 1410.0, "batch_min_ms": 1178.6, "batch_max_ms": 1476.5, "batch_avg_ms": 1275.3, "cumulative_batch_p50_ms": 1294.8, "cumulative_batch_p99_ms": 1417.8, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.73, "peak_rss_mb": 194.7, "db_size_mb": 3518.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "optimized", "checkpoint_rows": 3000000, "cumulative_time_sec": 824.12, "cumulative_rows_per_sec": 3640.2, "segment_rows": 3000000, "segment_time_sec": 824.12, "segment_rows_per_sec": 3640.2, "batch_count": 300, "batch_p50_ms": 2713.2, "batch_p95_ms": 2859.0, "batch_p99_ms": 3038.9, "batch_min_ms": 517.7, "batch_max_ms": 3400.4, "batch_avg_ms": 2715.0, "cumulative_batch_p50_ms": 2713.2, "cumulative_batch_p99_ms": 3038.9, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.49, "peak_rss_mb": 611.0, "db_size_mb": 1056.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "optimized", "checkpoint_rows": 5000000, "cumulative_time_sec": 1387.03, "cumulative_rows_per_sec": 3604.8, "segment_rows": 2000000, "segment_time_sec": 562.91, "segment_rows_per_sec": 3553.0, "batch_count": 200, "batch_p50_ms": 2775.1, "batch_p95_ms": 2928.0, "batch_p99_ms": 2989.4, "batch_min_ms": 2628.0, "batch_max_ms": 2994.0, "batch_avg_ms": 2781.8, "cumulative_batch_p50_ms": 2731.7, "cumulative_batch_p99_ms": 2989.7, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.57, "peak_rss_mb": 611.0, "db_size_mb": 1758.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "optimized", "checkpoint_rows": 10000000, "cumulative_time_sec": 2796.05, "cumulative_rows_per_sec": 3576.5, "segment_rows": 5000000, "segment_time_sec": 1409.02, "segment_rows_per_sec": 3548.6, "batch_count": 500, "batch_p50_ms": 2777.5, "batch_p95_ms": 2860.3, "batch_p99_ms": 2903.4, "batch_min_ms": 2666.6, "batch_max_ms": 3142.4, "batch_avg_ms": 2785.2, "cumulative_batch_p50_ms": 2758.1, "cumulative_batch_p99_ms": 2982.0, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.76, "peak_rss_mb": 611.0, "db_size_mb": 3515.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "aggressive", "checkpoint_rows": 3000000, "cumulative_time_sec": 928.2, "cumulative_rows_per_sec": 3232.1, "segment_rows": 3000000, "segment_time_sec": 928.2, "segment_rows_per_sec": 3232.1, "batch_count": 120, "batch_p50_ms": 7649.2, "batch_p95_ms": 8465.2, "batch_p99_ms": 8763.5, "batch_min_ms": 996.5, "batch_max_ms": 8810.7, "batch_avg_ms": 7654.5, "cumulative_batch_p50_ms": 7649.2, "cumulative_batch_p99_ms": 8763.5, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.52, "peak_rss_mb": 580.4, "db_size_mb": 1058.7, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "aggressive", "checkpoint_rows": 5000000, "cumulative_time_sec": 1553.49, "cumulative_rows_per_sec": 3218.6, "segment_rows": 2000000, "segment_time_sec": 625.29, "segment_rows_per_sec": 3198.5, "batch_count": 80, "batch_p50_ms": 7716.0, "batch_p95_ms": 8003.1, "batch_p99_ms": 8137.7, "batch_min_ms": 7488.2, "batch_max_ms": 8248.4, "batch_avg_ms": 7733.4, "cumulative_batch_p50_ms": 7689.0, "cumulative_batch_p99_ms": 8700.3, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.54, "peak_rss_mb": 594.5, "db_size_mb": 1758.8, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "aggressive", "checkpoint_rows": 10000000, "cumulative_time_sec": 3083.46, "cumulative_rows_per_sec": 3243.1, "segment_rows": 5000000, "segment_time_sec": 1529.97, "segment_rows_per_sec": 3268.0, "batch_count": 200, "batch_p50_ms": 7556.0, "batch_p95_ms": 7768.1, "batch_p99_ms": 7911.5, "batch_min_ms": 7256.4, "batch_max_ms": 9301.6, "batch_avg_ms": 7567.0, "cumulative_batch_p50_ms": 7606.8, "cumulative_batch_p99_ms": 8535.5, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.77, "peak_rss_mb": 595.2, "db_size_mb": 3516.3, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_1000", "checkpoint_rows": 3000000, "cumulative_time_sec": 774.99, "cumulative_rows_per_sec": 3871.0, "segment_rows": 3000000, "segment_time_sec": 774.99, "segment_rows_per_sec": 3871.0, "batch_count": 3000, "batch_p50_ms": 254.1, "batch_p95_ms": 287.1, "batch_p99_ms": 312.0, "batch_min_ms": 40.3, "batch_max_ms": 393.8, "batch_avg_ms": 253.3, "cumulative_batch_p50_ms": 254.1, "cumulative_batch_p99_ms": 312.0, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 4.55, "peak_rss_mb": 790.3, "db_size_mb": 1056.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_1000", "checkpoint_rows": 5000000, "cumulative_time_sec": 1297.5, "cumulative_rows_per_sec": 3853.6, "segment_rows": 2000000, "segment_time_sec": 522.51, "segment_rows_per_sec": 3827.7, "batch_count": 2000, "batch_p50_ms": 257.2, "batch_p95_ms": 290.5, "batch_p99_ms": 308.6, "batch_min_ms": 222.9, "batch_max_ms": 379.6, "batch_avg_ms": 256.2, "cumulative_batch_p50_ms": 255.3, "cumulative_batch_p99_ms": 310.8, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 4.55, "peak_rss_mb": 790.3, "db_size_mb": 1756.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_1000", "checkpoint_rows": 10000000, "cumulative_time_sec": 2616.99, "cumulative_rows_per_sec": 3821.2, "segment_rows": 5000000, "segment_time_sec": 1319.5, "segment_rows_per_sec": 3789.3, "batch_count": 5000, "batch_p50_ms": 258.7, "batch_p95_ms": 296.7, "batch_p99_ms": 315.1, "batch_min_ms": 219.4, "batch_max_ms": 364.7, "batch_avg_ms": 258.7, "cumulative_batch_p50_ms": 257.0, "cumulative_batch_p99_ms": 313.0, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 4.55, "peak_rss_mb": 790.3, "db_size_mb": 3513.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_5000", "checkpoint_rows": 3000000, "cumulative_time_sec": 803.34, "cumulative_rows_per_sec": 3734.4, "segment_rows": 3000000, "segment_time_sec": 803.34, "segment_rows_per_sec": 3734.4, "batch_count": 600, "batch_p50_ms": 1318.0, "batch_p95_ms": 1411.3, "batch_p99_ms": 1462.7, "batch_min_ms": 151.2, "batch_max_ms": 1524.2, "batch_avg_ms": 1310.7, "cumulative_batch_p50_ms": 1318.0, "cumulative_batch_p99_ms": 1462.7, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.45, "peak_rss_mb": 509.8, "db_size_mb": 1059.1, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_5000", "checkpoint_rows": 5000000, "cumulative_time_sec": 1345.92, "cumulative_rows_per_sec": 3714.9, "segment_rows": 2000000, "segment_time_sec": 542.59, "segment_rows_per_sec": 3686.1, "batch_count": 400, "batch_p50_ms": 1335.0, "batch_p95_ms": 1413.4, "batch_p99_ms": 1436.7, "batch_min_ms": 1225.8, "batch_max_ms": 1499.7, "batch_avg_ms": 1327.4, "cumulative_batch_p50_ms": 1325.1, "cumulative_batch_p99_ms": 1452.1, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.53, "peak_rss_mb": 508.1, "db_size_mb": 1760.5, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_5000", "checkpoint_rows": 10000000, "cumulative_time_sec": 2722.89, "cumulative_rows_per_sec": 3672.6, "segment_rows": 5000000, "segment_time_sec": 1376.97, "segment_rows_per_sec": 3631.2, "batch_count": 1000, "batch_p50_ms": 1349.6, "batch_p95_ms": 1458.3, "batch_p99_ms": 1535.9, "batch_min_ms": 1233.7, "batch_max_ms": 1658.4, "batch_avg_ms": 1347.5, "cumulative_batch_p50_ms": 1337.6, "cumulative_batch_p99_ms": 1499.7, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.73, "peak_rss_mb": 510.8, "db_size_mb": 3518.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_10000", "checkpoint_rows": 3000000, "cumulative_time_sec": 824.29, "cumulative_rows_per_sec": 3639.5, "segment_rows": 3000000, "segment_time_sec": 824.29, "segment_rows_per_sec": 3639.5, "batch_count": 300, "batch_p50_ms": 2721.9, "batch_p95_ms": 2799.8, "batch_p99_ms": 2887.3, "batch_min_ms": 189.2, "batch_max_ms": 2920.4, "batch_avg_ms": 2715.3, "cumulative_batch_p50_ms": 2721.9, "cumulative_batch_p99_ms": 2887.3, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.49, "peak_rss_mb": 610.4, "db_size_mb": 1056.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_10000", "checkpoint_rows": 5000000, "cumulative_time_sec": 1379.29, "cumulative_rows_per_sec": 3625.0, "segment_rows": 2000000, "segment_time_sec": 555.0, "segment_rows_per_sec": 3603.6, "batch_count": 200, "batch_p50_ms": 2736.8, "batch_p95_ms": 2841.8, "batch_p99_ms": 2918.5, "batch_min_ms": 2646.2, "batch_max_ms": 2969.7, "batch_avg_ms": 2742.3, "cumulative_batch_p50_ms": 2727.3, "cumulative_batch_p99_ms": 2908.7, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.57, "peak_rss_mb": 610.4, "db_size_mb": 1758.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_10000", "checkpoint_rows": 10000000, "cumulative_time_sec": 2761.7, "cumulative_rows_per_sec": 3621.0, "segment_rows": 5000000, "segment_time_sec": 1382.41, "segment_rows_per_sec": 3616.9, "batch_count": 500, "batch_p50_ms": 2729.3, "batch_p95_ms": 2810.1, "batch_p99_ms": 2836.8, "batch_min_ms": 2633.3, "batch_max_ms": 2847.5, "batch_avg_ms": 2731.8, "cumulative_batch_p50_ms": 2728.7, "cumulative_batch_p99_ms": 2887.3, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.76, "peak_rss_mb": 610.4, "db_size_mb": 3515.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_25000", "checkpoint_rows": 3000000, "cumulative_time_sec": 886.66, "cumulative_rows_per_sec": 3383.5, "segment_rows": 3000000, "segment_time_sec": 886.66, "segment_rows_per_sec": 3383.5, "batch_count": 120, "batch_p50_ms": 7375.8, "batch_p95_ms": 7498.2, "batch_p99_ms": 7528.9, "batch_min_ms": 460.4, "batch_max_ms": 7545.4, "batch_avg_ms": 7311.1, "cumulative_batch_p50_ms": 7375.8, "cumulative_batch_p99_ms": 7528.9, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.52, "peak_rss_mb": 613.4, "db_size_mb": 1058.7, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_25000", "checkpoint_rows": 5000000, "cumulative_time_sec": 1493.09, "cumulative_rows_per_sec": 3348.8, "segment_rows": 2000000, "segment_time_sec": 606.42, "segment_rows_per_sec": 3298.0, "batch_count": 80, "batch_p50_ms": 7498.3, "batch_p95_ms": 7660.0, "batch_p99_ms": 7710.5, "batch_min_ms": 7303.9, "batch_max_ms": 7863.0, "batch_avg_ms": 7499.9, "cumulative_batch_p50_ms": 7415.4, "cumulative_batch_p99_ms": 7665.3, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.54, "peak_rss_mb": 614.1, "db_size_mb": 1758.8, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_25000", "checkpoint_rows": 10000000, "cumulative_time_sec": 3065.71, "cumulative_rows_per_sec": 3261.9, "segment_rows": 5000000, "segment_time_sec": 1572.63, "segment_rows_per_sec": 3179.4, "batch_count": 200, "batch_p50_ms": 7720.3, "batch_p95_ms": 8280.0, "batch_p99_ms": 8604.1, "batch_min_ms": 7254.8, "batch_max_ms": 8946.2, "batch_avg_ms": 7780.5, "cumulative_batch_p50_ms": 7520.4, "cumulative_batch_p99_ms": 8490.3, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.77, "peak_rss_mb": 628.8, "db_size_mb": 3516.3, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_50000", "checkpoint_rows": 3000000, "cumulative_time_sec": 1011.41, "cumulative_rows_per_sec": 2966.2, "segment_rows": 3000000, "segment_time_sec": 1011.41, "segment_rows_per_sec": 2966.2, "batch_count": 60, "batch_p50_ms": 16495.4, "batch_p95_ms": 20480.7, "batch_p99_ms": 20646.6, "batch_min_ms": 1174.3, "batch_max_ms": 20753.8, "batch_avg_ms": 16692.0, "cumulative_batch_p50_ms": 16495.4, "cumulative_batch_p99_ms": 20646.6, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.52, "peak_rss_mb": 631.3, "db_size_mb": 1058.5, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_50000", "checkpoint_rows": 5000000, "cumulative_time_sec": 1661.5, "cumulative_rows_per_sec": 3009.3, "segment_rows": 2000000, "segment_time_sec": 650.09, "segment_rows_per_sec": 3076.5, "batch_count": 40, "batch_p50_ms": 16076.8, "batch_p95_ms": 16386.2, "batch_p99_ms": 16491.6, "batch_min_ms": 15831.9, "batch_max_ms": 16522.3, "batch_avg_ms": 16094.5, "cumulative_batch_p50_ms": 16319.9, "cumulative_batch_p99_ms": 20574.0, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.56, "peak_rss_mb": 652.0, "db_size_mb": 1758.6, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "chunk_50000", "checkpoint_rows": 10000000, "cumulative_time_sec": 3284.41, "cumulative_rows_per_sec": 3044.7, "segment_rows": 5000000, "segment_time_sec": 1622.91, "segment_rows_per_sec": 3080.9, "batch_count": 100, "batch_p50_ms": 16047.6, "batch_p95_ms": 16485.7, "batch_p99_ms": 16731.0, "batch_min_ms": 15476.7, "batch_max_ms": 16922.6, "batch_avg_ms": 16071.7, "cumulative_batch_p50_ms": 16193.2, "cumulative_batch_p99_ms": 20508.1, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.75, "peak_rss_mb": 633.4, "db_size_mb": 3515.3, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_3", "checkpoint_rows": 3000000, "cumulative_time_sec": 863.92, "cumulative_rows_per_sec": 3472.5, "segment_rows": 3000000, "segment_time_sec": 863.92, "segment_rows_per_sec": 3472.5, "batch_count": 300, "batch_p50_ms": 2850.3, "batch_p95_ms": 2973.6, "batch_p99_ms": 3038.8, "batch_min_ms": 184.0, "batch_max_ms": 3109.2, "batch_avg_ms": 2846.5, "cumulative_batch_p50_ms": 2850.3, "cumulative_batch_p99_ms": 3038.8, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.49, "peak_rss_mb": 610.9, "db_size_mb": 1056.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_3", "checkpoint_rows": 5000000, "cumulative_time_sec": 1443.96, "cumulative_rows_per_sec": 3462.7, "segment_rows": 2000000, "segment_time_sec": 580.04, "segment_rows_per_sec": 3448.0, "batch_count": 200, "batch_p50_ms": 2865.1, "batch_p95_ms": 2983.3, "batch_p99_ms": 3013.5, "batch_min_ms": 2734.9, "batch_max_ms": 3021.4, "batch_avg_ms": 2866.3, "cumulative_batch_p50_ms": 2858.4, "cumulative_batch_p99_ms": 3031.6, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.57, "peak_rss_mb": 610.9, "db_size_mb": 1758.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_3", "checkpoint_rows": 10000000, "cumulative_time_sec": 2902.99, "cumulative_rows_per_sec": 3444.7, "segment_rows": 5000000, "segment_time_sec": 1459.03, "segment_rows_per_sec": 3426.9, "batch_count": 500, "batch_p50_ms": 2863.2, "batch_p95_ms": 3038.0, "batch_p99_ms": 3391.2, "batch_min_ms": 2674.1, "batch_max_ms": 4087.4, "batch_avg_ms": 2883.9, "cumulative_batch_p50_ms": 2860.3, "cumulative_batch_p99_ms": 3199.9, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.76, "peak_rss_mb": 610.1, "db_size_mb": 3515.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_5", "checkpoint_rows": 3000000, "cumulative_time_sec": 840.32, "cumulative_rows_per_sec": 3570.1, "segment_rows": 3000000, "segment_time_sec": 840.32, "segment_rows_per_sec": 3570.1, "batch_count": 300, "batch_p50_ms": 2775.0, "batch_p95_ms": 2911.5, "batch_p99_ms": 3004.9, "batch_min_ms": 206.2, "batch_max_ms": 3054.9, "batch_avg_ms": 2768.4, "cumulative_batch_p50_ms": 2775.0, "cumulative_batch_p99_ms": 3004.9, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.49, "peak_rss_mb": 609.3, "db_size_mb": 1056.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_5", "checkpoint_rows": 5000000, "cumulative_time_sec": 1397.65, "cumulative_rows_per_sec": 3577.4, "segment_rows": 2000000, "segment_time_sec": 557.33, "segment_rows_per_sec": 3588.5, "batch_count": 200, "batch_p50_ms": 2743.4, "batch_p95_ms": 2822.8, "batch_p99_ms": 2847.2, "batch_min_ms": 2678.2, "batch_max_ms": 2850.8, "batch_avg_ms": 2754.0, "cumulative_batch_p50_ms": 2766.0, "cumulative_batch_p99_ms": 2943.1, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.57, "peak_rss_mb": 609.3, "db_size_mb": 1758.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_5", "checkpoint_rows": 10000000, "cumulative_time_sec": 2797.9, "cumulative_rows_per_sec": 3574.1, "segment_rows": 5000000, "segment_time_sec": 1400.25, "segment_rows_per_sec": 3570.8, "batch_count": 500, "batch_p50_ms": 2763.4, "batch_p95_ms": 2859.3, "batch_p99_ms": 2959.8, "batch_min_ms": 2659.4, "batch_max_ms": 2994.2, "batch_avg_ms": 2767.4, "cumulative_batch_p50_ms": 2764.9, "cumulative_batch_p99_ms": 2959.8, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.76, "peak_rss_mb": 609.3, "db_size_mb": 3515.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_8", "checkpoint_rows": 3000000, "cumulative_time_sec": 833.68, "cumulative_rows_per_sec": 3598.5, "segment_rows": 3000000, "segment_time_sec": 833.68, "segment_rows_per_sec": 3598.5, "batch_count": 300, "batch_p50_ms": 2751.6, "batch_p95_ms": 2864.6, "batch_p99_ms": 2903.6, "batch_min_ms": 191.2, "batch_max_ms": 2957.7, "batch_avg_ms": 2746.5, "cumulative_batch_p50_ms": 2751.6, "cumulative_batch_p99_ms": 2903.6, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.49, "peak_rss_mb": 608.7, "db_size_mb": 1056.9, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_8", "checkpoint_rows": 5000000, "cumulative_time_sec": 1393.69, "cumulative_rows_per_sec": 3587.6, "segment_rows": 2000000, "segment_time_sec": 560.01, "segment_rows_per_sec": 3571.4, "batch_count": 200, "batch_p50_ms": 2766.3, "batch_p95_ms": 2860.7, "batch_p99_ms": 2978.4, "batch_min_ms": 2673.1, "batch_max_ms": 2995.3, "batch_avg_ms": 2767.3, "cumulative_batch_p50_ms": 2754.1, "cumulative_batch_p99_ms": 2940.4, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.57, "peak_rss_mb": 596.8, "db_size_mb": 1758.0, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}, {"config_name": "pool_8", "checkpoint_rows": 10000000, "cumulative_time_sec": 2799.05, "cumulative_rows_per_sec": 3572.6, "segment_rows": 5000000, "segment_time_sec": 1405.37, "segment_rows_per_sec": 3557.8, "batch_count": 500, "batch_p50_ms": 2772.1, "batch_p95_ms": 2885.5, "batch_p99_ms": 2956.8, "batch_min_ms": 2667.2, "batch_max_ms": 3010.3, "batch_avg_ms": 2777.6, "cumulative_batch_p50_ms": 2764.5, "cumulative_batch_p99_ms": 2956.8, "read_p50_ms": 0, "read_p95_ms": 0, "read_p99_ms": 0, "max_wal_mb": 6.76, "peak_rss_mb": 606.5, "db_size_mb": 3515.4, "total_errors": 0, "interface_errors": 0, "lock_errors": 0}];
+const CONFIGS = ["aggressive", "baseline", "chunk_1000", "chunk_10000", "chunk_25000", "chunk_5000", "chunk_50000", "optimized", "pool_3", "pool_5", "pool_8"];
+const CHECKPOINTS = [3000000, 5000000, 10000000];
+const COLORS = ["#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1", "#84cc16"];
+
+function groupBy(arr, key) {
+    return arr.reduce((acc, item) => {
+        (acc[item[key]] = acc[item[key]] || []).push(item);
+        return acc;
+    }, {});
+}
+
+function fmtRows(n) {
+    if (n >= 1e6) return (n/1e6).toFixed(0) + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(0) + 'K';
+    return n.toString();
+}
+
+const byCheckpoint = groupBy(RESULTS, 'checkpoint_rows');
+const byConfig = groupBy(RESULTS, 'config_name');
+
+// 1. Throughput bar chart — per checkpoint, grouped by config
+(function() {
+    const labels = CHECKPOINTS.map(fmtRows);
+    const datasets = CONFIGS.map((cfg, i) => ({
+        label: cfg,
+        backgroundColor: COLORS[i % COLORS.length],
+        data: CHECKPOINTS.map(cp => {
+            const match = RESULTS.find(r => r.config_name === cfg && r.checkpoint_rows === cp);
+            return match ? Math.round(match.cumulative_rows_per_sec) : 0;
+        })
+    }));
+    new Chart(document.getElementById('throughputChart'), {
+        type: 'bar',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Throughput by Scale (rows/s)' },
+                       legend: { position: 'bottom' } },
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'rows/s' } } }
+        }
+    });
+})();
+
+// 2. Scaling line chart — rows/s vs scale for each config
+(function() {
+    const datasets = CONFIGS.map((cfg, i) => {
+        const cfgResults = (byConfig[cfg] || []).sort((a,b) => a.checkpoint_rows - b.checkpoint_rows);
+        return {
+            label: cfg,
+            borderColor: COLORS[i % COLORS.length],
+            backgroundColor: COLORS[i % COLORS.length] + '20',
+            fill: false,
+            tension: 0.3,
+            data: cfgResults.map(r => ({ x: r.checkpoint_rows, y: Math.round(r.cumulative_rows_per_sec) }))
+        };
+    });
+    new Chart(document.getElementById('scalingChart'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Scaling Behavior (Throughput vs DB Size)' },
+                       legend: { position: 'bottom' } },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Rows in DB' },
+                     ticks: { callback: fmtRows } },
+                y: { beginAtZero: true, title: { display: true, text: 'rows/s' } }
+            }
+        }
+    });
+})();
+
+// 3. Latency bar chart — p50/p95/p99 at max checkpoint
+(function() {
+    const maxCp = Math.max(...CHECKPOINTS);
+    const atMax = RESULTS.filter(r => r.checkpoint_rows === maxCp)
+                         .sort((a,b) => a.batch_p99_ms - b.batch_p99_ms);
+    const labels = atMax.map(r => r.config_name);
+
+    new Chart(document.getElementById('latencyChart'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                { label: 'P50 (ms)', backgroundColor: '#3b82f6', data: atMax.map(r => r.batch_p50_ms || 0) },
+                { label: 'P95 (ms)', backgroundColor: '#f59e0b', data: atMax.map(r => r.batch_p95_ms || 0) },
+                { label: 'P99 (ms)', backgroundColor: '#ef4444', data: atMax.map(r => r.batch_p99_ms || 0) },
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Batch Latency at ' + fmtRows(maxCp) + ' rows (ms)' },
+                       legend: { position: 'bottom' } },
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } }
+        }
+    });
+})();
+
+// 4. Latency scaling chart — p99 vs scale
+(function() {
+    const datasets = CONFIGS.map((cfg, i) => {
+        const cfgResults = (byConfig[cfg] || []).sort((a,b) => a.checkpoint_rows - b.checkpoint_rows);
+        return {
+            label: cfg,
+            borderColor: COLORS[i % COLORS.length],
+            fill: false,
+            tension: 0.3,
+            data: cfgResults.map(r => ({ x: r.checkpoint_rows, y: r.batch_p99_ms || 0 }))
+        };
+    });
+    new Chart(document.getElementById('latencyScalingChart'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Batch P99 Latency vs DB Size' },
+                       legend: { position: 'bottom' } },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Rows in DB' },
+                     ticks: { callback: fmtRows } },
+                y: { beginAtZero: true, title: { display: true, text: 'P99 (ms)' } }
+            }
+        }
+    });
+})();
+
+// 5. RSS chart — peak RSS vs scale
+(function() {
+    const datasets = CONFIGS.map((cfg, i) => {
+        const cfgResults = (byConfig[cfg] || []).sort((a,b) => a.checkpoint_rows - b.checkpoint_rows);
+        return {
+            label: cfg,
+            borderColor: COLORS[i % COLORS.length],
+            fill: false,
+            tension: 0.3,
+            data: cfgResults.map(r => ({ x: r.checkpoint_rows, y: r.peak_rss_mb || 0 }))
+        };
+    });
+    new Chart(document.getElementById('rssChart'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Peak RSS Memory vs DB Size' },
+                       legend: { position: 'bottom' } },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Rows in DB' },
+                     ticks: { callback: fmtRows } },
+                y: { beginAtZero: true, title: { display: true, text: 'MB' } }
+            }
+        }
+    });
+})();
+
+// 6. DB size chart
+(function() {
+    const datasets = CONFIGS.map((cfg, i) => {
+        const cfgResults = (byConfig[cfg] || []).sort((a,b) => a.checkpoint_rows - b.checkpoint_rows);
+        return {
+            label: cfg,
+            borderColor: COLORS[i % COLORS.length],
+            fill: false,
+            tension: 0.3,
+            data: cfgResults.map(r => ({ x: r.checkpoint_rows, y: r.db_size_mb || 0 }))
+        };
+    });
+    new Chart(document.getElementById('dbSizeChart'), {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            plugins: { title: { display: true, text: 'Database Size vs Rows Inserted' },
+                       legend: { position: 'bottom' } },
+            scales: {
+                x: { type: 'linear', title: { display: true, text: 'Rows in DB' },
+                     ticks: { callback: fmtRows } },
+                y: { beginAtZero: true, title: { display: true, text: 'MB' } }
+            }
+        }
+    });
+})();
+
+</script>
+</body>
+</html>
