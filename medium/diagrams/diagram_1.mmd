@@ -1,0 +1,10 @@
+flowchart TD
+    A["Python dict"] --> B["Object instantiation<br/>BenchRow(**row)"]
+    B --> C["Attribute instrumentation<br/>change tracking wrapper"]
+    C --> D["Identity map lookup<br/>does this PK already exist?"]
+    D --> E["Unit-of-work registration"]
+    E --> F["SQL compilation<br/>cached, but still parsed"]
+    F --> G["Type marshalling<br/>Python types to DB types"]
+    G --> H["Session bookkeeping<br/>flush ordering, cascades"]
+    H --> I["dbapi cursor.execute()"]
+    I --> J["SQLite C engine"]

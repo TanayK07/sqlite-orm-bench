@@ -1,0 +1,10 @@
+flowchart TD
+    Q{"Bulk write?"}
+    Q -->|"No, single row CRUD"| ORM["Use ORM"]
+    Q -->|"Yes"| C{"How many rows?"}
+    C -->|"under 1K"| ORM
+    C -->|"1K to 10K"| OK{"Sustained over 1K r/s<br/>required?"}
+    OK -->|"No"| ORM
+    OK -->|"Yes"| RAW["Raw executemany"]
+    C -->|"10K to 1M"| RAW
+    C -->|"over 1M"| RAW2["Raw executemany<br/>required"]
