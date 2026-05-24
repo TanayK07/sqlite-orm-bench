@@ -216,27 +216,11 @@ Baseline wins on the throughput-per-resource ratio. 5K chunks, default PRAGMAs, 
 
 Every row through SQLAlchemy goes through this:
 
-```mermaid
-flowchart TD
-    A["Python dict"] --> B["Object instantiation<br/>BenchRow(**row)"]
-    B --> C["Attribute instrumentation<br/>change tracking wrapper"]
-    C --> D["Identity map lookup<br/>does this PK already exist?"]
-    D --> E["Unit-of-work registration"]
-    E --> F["SQL compilation<br/>cached, but still parsed"]
-    F --> G["Type marshalling<br/>Python types to DB types"]
-    G --> H["Session bookkeeping<br/>flush ordering, cascades"]
-    H --> I["dbapi cursor.execute()"]
-    I --> J["SQLite C engine"]
-```
+![ORM stack: 7 layers per row](https://raw.githubusercontent.com/TanayK07/sqlite-orm-bench/main/docs/diagrams/diagram_1.png)
 
 Raw `executemany` does this:
 
-```mermaid
-flowchart TD
-    A["Python dict"] --> K["Tuple conversion"]
-    K --> I["dbapi cursor.executemany()"]
-    I --> J["SQLite C engine"]
-```
+![Raw executemany stack: 2 layers per row](https://raw.githubusercontent.com/TanayK07/sqlite-orm-bench/main/docs/diagrams/diagram_2.png)
 
 Two layers, seven gone. None of the seven are free. Each one is a Python attribute access, a dict lookup, a function call, something the JIT cannot inline because of how SQLAlchemy is structured. On a one-shot insert it is invisible. On 10 million rows it costs 43 minutes.
 
@@ -442,13 +426,7 @@ PRAGMA wal_autocheckpoint = 1000;   -- Default, ~4MB WAL before checkpoint
 
 ### Connection architecture
 
-```mermaid
-flowchart LR
-    A["Application"] -->|all writes| W["Writer pool<br/>1 connection<br/>BEGIN IMMEDIATE"]
-    A -->|all reads| R["Reader pool<br/>N connections<br/>N = CPU cores"]
-    W --> DB[("SQLite<br/>WAL mode")]
-    R --> DB
-```
+![Single-writer plus multi-reader](https://raw.githubusercontent.com/TanayK07/sqlite-orm-bench/main/docs/diagrams/diagram_3.png)
 
 Every production deployment I looked at converged on single-writer plus multi-reader. SQLAlchemy's QueuePool with `pool_size=5` does the same thing in practice, which is why I saw zero errors across 110 million rows.
 
@@ -469,18 +447,7 @@ If you skipped to this table, here is the summary: nothing on the left changes t
 
 The ORM is fine for most things. CRUD, reads, validation, relationship traversal, normal application work. The fast path is for the hot bulk routes. Use this decision tree:
 
-```mermaid
-flowchart TD
-    Q{"Bulk write?"}
-    Q -->|"No, single row CRUD"| ORM["Use ORM"]
-    Q -->|"Yes"| C{"How many rows?"}
-    C -->|"under 1K"| ORM
-    C -->|"1K to 10K"| OK{"Sustained over 1K r/s<br/>required?"}
-    OK -->|"No"| ORM
-    OK -->|"Yes"| RAW["Raw executemany"]
-    C -->|"10K to 1M"| RAW
-    C -->|"over 1M"| RAW2["Raw executemany<br/>required"]
-```
+![When to throw the ORM out](https://raw.githubusercontent.com/TanayK07/sqlite-orm-bench/main/docs/diagrams/diagram_4.png)
 
 | Scenario | ORM | Raw SQL | What to do |
 |----------|-----|---------|------------|
