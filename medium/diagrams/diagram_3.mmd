@@ -1,5 +1,0 @@
-flowchart LR
-    A["Application"] -->|all writes| W["Writer pool<br/>1 connection<br/>BEGIN IMMEDIATE"]
-    A -->|all reads| R["Reader pool<br/>N connections<br/>N = CPU cores"]
-    W --> DB[("SQLite<br/>WAL mode")]
-    R --> DB
