@@ -1,61 +1,45 @@
-# Your ORM Is the Bottleneck: SQLite Handles 88K Writes/sec — Your ORM Caps at 3,800
+# Your ORM is the bottleneck
 
-**A benchmark-driven investigation into SQLite write performance at 10M–50M row scale, proving that PRAGMA tuning is irrelevant when ORM overhead dominates.**
+SQLite handles 88,000 writes per second on commodity hardware. My ORM caps at 3,800. PRAGMA tuning does not move that number.
+
+I learned this the hard way, over 9.4 hours of benchmarking. 11 SQLite configurations, 230 million rows, 37 measured datapoints. Across every config I threw at it, ORM throughput landed between 3,045 and 3,821 rows per second. A 26% spread on the thing every guide on the internet is busy tuning. Same workload, rewritten as raw `executemany`, did 87,893.
+
+The database was fine. It was always fine.
 
 ---
 
-## TL;DR
+## The headline numbers
 
-We benchmarked SQLite write performance across **11 configurations × 10M rows** through a production ORM (SQLAlchemy), then compared ORM vs raw `executemany` at **10M and 50M rows**. The results:
-
-| Path | 10M rows | 50M rows | p99 Latency |
+| Path | 10M rows | 50M rows | p99 latency |
 |------|----------|----------|-------------|
-| **SQLAlchemy ORM** | 3,696 r/s (45 min) | 3,682 r/s (3.8 hrs) | 1,492ms |
-| **Raw executemany** | 87,893 r/s (1.9 min) | 65,742 r/s (12.7 min) | 478ms |
+| SQLAlchemy ORM | 3,696 r/s (45 min) | 3,682 r/s (3.8 hrs) | 1,492 ms |
+| Raw `executemany` | 87,893 r/s (1.9 min) | 65,742 r/s (12.7 min) | 478 ms |
 | **Speedup** | **23.8×** | **17.9×** | **3.1×** |
 
-Across 11 PRAGMA configurations (sync modes, cache sizes, pool sizes, mmap, chunk sizes), ORM throughput varied only **26%** (3,045–3,821 r/s). The database isn't your bottleneck — your ORM is.
+Zero errors across all runs. Every config. Every scale.
 
-Zero errors across all runs. Every configuration. Every scale.
+What I actually ran:
 
-**Scope of measurement:**
-- **9.4 hours** of continuous benchmarking
-- **230 million** rows written across all runs
-- **11 configurations × 3 checkpoints** + **2 paths × 2 scales** = **37 measured datapoints**
-- Single host, NVMe storage, isolated benchmark per config (fresh DB file each time)
-
----
-
-## Table of Contents
-
-1. [Why This Matters](#why-this-matters)
-2. [Test Environment](#test-environment)
-3. [Methodology](#methodology)
-4. [Benchmark 1: The ORM Config Sweep (11 Configs × 10M)](#benchmark-1-the-orm-config-sweep)
-5. [Benchmark 2: ORM vs Raw SQL (10M & 50M)](#benchmark-2-orm-vs-raw-sql)
-6. [Key Finding: Chunk Size Controls Latency, Not Throughput](#key-finding-chunk-size)
-7. [How Our Numbers Compare to the Industry](#industry-comparison)
-8. [The Production Config Everyone Agrees On](#production-config)
-9. [When to Bypass Your ORM](#when-to-bypass-orm)
-10. [Surprising Findings From the Literature](#surprising-findings)
-11. [Reproducing These Results](#reproducing)
-12. [References](#references)
+- 9.4 hours of continuous benchmarking
+- 230 million rows written across all runs
+- 11 configurations × 3 checkpoints + 2 paths × 2 scales = 37 datapoints
+- Single host, NVMe storage, fresh database file per run
 
 ---
 
-## Why This Matters <a id="why-this-matters"></a>
+## Why I started running this
 
-SQLite is having a moment. Rails 8 ships with it as a [first-class production database](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required). Kent C. Dodds [migrated from a Postgres cluster](https://kentcdodds.com/blog/i-migrated-from-a-postgres-cluster-to-distributed-sqlite-with-litefs) to distributed SQLite. Expensify serves [4 million queries per second](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server) from a single SQLite database. Cloudflare D1 runs SQLite at the edge with [8ms P99 read latency](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j).
+SQLite is having a moment. Rails 8 [ships with it](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required) as a first-class production database. Kent C. Dodds [moved off a Postgres cluster](https://kentcdodds.com/blog/i-migrated-from-a-postgres-cluster-to-distributed-sqlite-with-litefs) to run it. Expensify is doing [4 million queries per second](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server) on a single SQLite file. Cloudflare D1 runs it at the edge with [8 ms P99 reads](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j).
 
-But most SQLite optimization guides focus on **PRAGMA tuning** — synchronous modes, cache sizes, mmap settings. We wanted to answer a different question:
+So I sat down to tune mine. WAL, mmap, cache size, sync mode, the usual PRAGMA folklore. I had a question I wanted answered, and it was not the one most blogs answer.
 
-> **Does any of that matter when you're writing through an ORM?**
+Most blogs tune SQLite. I wanted to know whether any of that tuning matters when you write through an ORM.
 
-We ran 110 million rows through SQLite across 11 configurations to find out. The answer is no.
+It does not. Not even a little.
 
 ---
 
-## Test Environment <a id="test-environment"></a>
+## What I tested it on
 
 | Component | Spec |
 |-----------|------|
@@ -66,29 +50,28 @@ We ran 110 million rows through SQLite across 11 configurations to find out. The
 | Python | 3.11 |
 | SQLAlchemy | 2.0 (sync) |
 | SQLite | WAL mode, QueuePool |
-| Database | Single table, 11 columns, UUID primary key |
+| Schema | Single table, 11 columns, UUID primary key |
 
-All benchmarks run on the same machine, same NVMe, same kernel. No Docker. No network. Pure local SQLite writes.
+Everything ran on the same machine, same NVMe, same kernel. No Docker. No network. Local SQLite, period.
 
 ---
 
-## Methodology <a id="methodology"></a>
+## The two benchmarks
 
-### What We Measured
+Two harnesses, two questions.
 
-Two complementary benchmarks:
+**Config sweep.** 11 SQLite configurations, 10M rows each, all through SQLAlchemy. Does PRAGMA tuning matter?
 
-1. **Config Sweep**: 11 SQLite configurations × 10M rows each, all through the ORM. Tests whether PRAGMA tuning matters.
-2. **Before/After**: ORM (SQLAlchemy `bulk_save_objects` + `on_conflict_do_update`) vs Raw (`sqlite3.executemany`) at 10M and 50M rows. Measures the ORM tax.
+**Before / after.** Same workload, ORM path vs raw `executemany`, at 10M and 50M. How much throughput does the ORM cost?
 
-### The ORM Path (Before)
+### The ORM path
 
 ```python
-# Insert phase: SQLAlchemy bulk_save_objects
+# Insert phase: bulk_save_objects
 session.bulk_save_objects([BenchRow(**row) for row in chunk])
 session.commit()
 
-# Upsert phase: SQLAlchemy insert().on_conflict_do_update()
+# Upsert phase: insert().on_conflict_do_update()
 stmt = insert(BenchRow).values(chunk)
 stmt = stmt.on_conflict_do_update(
     index_elements=["tenant_id", "entity_id", "sub_entity_id", "bucket_index"],
@@ -98,10 +81,10 @@ session.execute(stmt)
 session.commit()
 ```
 
-### The Raw Path (After)
+### The raw path
 
 ```python
-# Raw sqlite3.executemany — bypasses ORM entirely
+# sqlite3.executemany via the dbapi connection. Skips SQLAlchemy entirely.
 raw_conn = session.connection().connection.dbapi_connection
 cursor = raw_conn.cursor()
 cursor.executemany(
@@ -111,9 +94,11 @@ cursor.executemany(
 raw_conn.commit()
 ```
 
+Both paths use the same generator, same schema, same target row count. The only difference is whether SQLAlchemy is in the picture.
+
 ### Schema
 
-A single 11-column table designed to mimic production workloads:
+A single 11-column table, designed to look like a real production table rather than a synthetic benchmark.
 
 | Column | Type | Role |
 |--------|------|------|
@@ -122,17 +107,17 @@ A single 11-column table designed to mimic production workloads:
 | `entity_id` | Integer | Natural-key component |
 | `sub_entity_id` | Integer | Natural-key component |
 | `bucket_index` | Integer | Natural-key component |
-| `measurement_x/y/z` | Float | Numeric payload |
+| `measurement_x / y / z` | Float | Numeric payload |
 | `category_id` | Integer | Categorical field |
 | `weight` | Float | Probabilistic payload |
 | `status` | Integer | State machine field |
-| `created_at` / `updated_at` | DateTime | Tracking timestamps |
+| `created_at / updated_at` | DateTime | Tracking timestamps |
 
-Unique constraint on `(tenant_id, entity_id, sub_entity_id, bucket_index)` — the upsert conflict target. Row size ~500 bytes including the UUID PK.
+Unique constraint on `(tenant_id, entity_id, sub_entity_id, bucket_index)`, which is the upsert conflict target. Row size lands around 500 bytes including the UUID.
 
-### Data Generation
+### Data generation
 
-Streaming generator producing unique rows with deterministic natural keys. Constant memory regardless of total scale — never materializes the full row set.
+A streaming generator that yields chunks of unique rows with deterministic natural keys. Constant memory regardless of total scale. It never materialises the full row set.
 
 ```python
 def streaming_chunks(total_rows, chunk_size):
@@ -146,39 +131,35 @@ def streaming_chunks(total_rows, chunk_size):
                 "entity_id": counter % 1000,
                 "sub_entity_id": (counter // 1000) % 1000,
                 "bucket_index": counter // 1_000_000,
-                # ... numeric/categorical fields
+                # ... numeric and categorical fields
             })
             counter += 1
         yield chunk
 ```
 
-Determinism matters: re-running the same generator produces *identical* natural keys, which forces the upsert path to actually exercise ON CONFLICT behavior instead of trivially inserting fresh rows.
+The determinism matters. Re-running the same generator produces identical natural keys, which forces the upsert path to actually exercise ON CONFLICT instead of trivially inserting fresh rows. Without this, you are benchmarking inserts and calling it an upsert benchmark.
 
-### Checkpoints and Recovery
+### Checkpoints and recovery
 
-Results saved at 3M, 5M, and 10M rows for the config sweep; at 10M and 50M for ORM-vs-raw. Intermediate results written to JSON after each segment (`--resume` flag). The 50M ORM run took 3.8 hours — resume capability was essential after a kernel suspend.
+Results saved at 3M, 5M, and 10M for the config sweep. 10M and 50M for the before / after. Intermediate JSON written after each segment, with `--resume` to pick up where we left off. The 50M ORM run took 3.8 hours. The laptop suspended once. The resume capability paid for itself.
 
-### Total Compute Invested
+### How much compute went into this
 
-| Phase | Duration | Rows | Notes |
-|-------|----------|------|-------|
-| Config sweep (11 configs × 10M) | 5.6 hours | 110M | 33 checkpoint datapoints |
-| Before/After (10M + 50M, both modes) | 3.8 hours | 120M | 4 checkpoint datapoints |
-| **Total** | **9.4 hours** | **230M** | **37 datapoints** |
+| Phase | Duration | Rows | Datapoints |
+|-------|----------|------|------------|
+| Config sweep (11 configs × 10M) | 5.6 hours | 110M | 33 |
+| Before / after (10M + 50M, both modes) | 3.8 hours | 120M | 4 |
+| **Total** | **9.4 hours** | **230M** | **37** |
 
-Single host, single process at a time, no concurrent benchmarks. Background metrics sampler (psutil) at 1Hz throughout. Each config used a fresh database file via `tempfile.TemporaryDirectory()`.
+Single host, single process at a time. Background `psutil` sampler at 1Hz throughout. Each config got a freshly created database file via `tempfile.TemporaryDirectory()`, so no run was polluted by any prior run.
 
 ---
 
-## Benchmark 1: The ORM Config Sweep <a id="benchmark-1-the-orm-config-sweep"></a>
+## Benchmark 1: the config sweep
 
-**Question**: Does PRAGMA tuning improve ORM write throughput?
+11 SQLite configurations, 10 million rows each, all written through SQLAlchemy.
 
-**Answer**: No. 26% spread across 11 configurations. The ORM is the ceiling.
-
-### 11 Configurations Tested
-
-| Config | Chunk Size | Sync | Cache | Pool | mmap |
+| Config | Chunk size | Sync | Cache | Pool | mmap |
 |--------|-----------|------|-------|------|------|
 | baseline | 5,000 | NORMAL | -4096 | 5 | 0 |
 | chunk_1000 | 1,000 | NORMAL | -64000 | 5 | 256MB |
@@ -192,319 +173,350 @@ Single host, single process at a time, no concurrent benchmarks. Background metr
 | pool_5 | 10,000 | NORMAL | -64000 | 5 | 256MB |
 | pool_8 | 10,000 | NORMAL | -64000 | 8 | 256MB |
 
-### Results at 10M Rows (sorted by throughput)
+### Results at 10M rows
 
-| Config | Throughput | p99 Latency | Peak RSS | Errors |
+| Config | Throughput | p99 latency | Peak RSS | Errors |
 |--------|-----------|-------------|----------|--------|
-| chunk_1000 | 3,821 r/s | 313ms | 790 MB | 0 |
-| **baseline** | **3,802 r/s** | **1,418ms** | **195 MB** | **0** |
-| chunk_5000 | 3,673 r/s | 1,500ms | 511 MB | 0 |
-| chunk_10000 | 3,621 r/s | 2,887ms | 610 MB | 0 |
-| optimized | 3,576 r/s | 2,982ms | 611 MB | 0 |
-| pool_5 | 3,574 r/s | 2,960ms | 609 MB | 0 |
-| pool_8 | 3,573 r/s | 2,957ms | 606 MB | 0 |
-| pool_3 | 3,445 r/s | 3,200ms | 610 MB | 0 |
-| chunk_25000 | 3,262 r/s | 8,490ms | 629 MB | 0 |
-| aggressive | 3,243 r/s | 8,536ms | 595 MB | 0 |
-| chunk_50000 | 3,045 r/s | 20,508ms | 633 MB | 0 |
+| chunk_1000 | 3,821 r/s | 313 ms | 790 MB | 0 |
+| baseline | 3,802 r/s | 1,418 ms | 195 MB | 0 |
+| chunk_5000 | 3,673 r/s | 1,500 ms | 511 MB | 0 |
+| chunk_10000 | 3,621 r/s | 2,887 ms | 610 MB | 0 |
+| optimized | 3,576 r/s | 2,982 ms | 611 MB | 0 |
+| pool_5 | 3,574 r/s | 2,960 ms | 609 MB | 0 |
+| pool_8 | 3,573 r/s | 2,957 ms | 606 MB | 0 |
+| pool_3 | 3,445 r/s | 3,200 ms | 610 MB | 0 |
+| chunk_25000 | 3,262 r/s | 8,490 ms | 629 MB | 0 |
+| aggressive | 3,243 r/s | 8,536 ms | 595 MB | 0 |
+| chunk_50000 | 3,045 r/s | 20,508 ms | 633 MB | 0 |
 
-### What This Tells Us
+Three things to notice.
 
-**Throughput is flat.** Best to worst: 3,821 vs 3,045 r/s. A 26% spread across configs that range from `sync=OFF` to default PRAGMAs, 1K to 50K chunks, 3 to 8 pool connections. The ORM consumes ~95% of the CPU time per row — object creation, attribute tracking, unit-of-work bookkeeping, SQL compilation. PRAGMA changes can't fix that.
+The first is the spread. Best to worst, 3,821 vs 3,045 rows per second. That is 26% across configs that range from `sync=OFF` to default PRAGMAs, from 1K to 50K chunk sizes, from 3 to 8 pool connections. Whatever PRAGMA folklore you have read, on this workload, it is doing roughly nothing. The ORM is consuming the CPU budget before I/O becomes a factor.
 
-**`sync=OFF` doesn't help.** The `aggressive` config (sync=OFF, 25K chunks) is the *second worst* at 3,243 r/s. You sacrifice durability for nothing. This matches findings from [Forward Email](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) (2–13% difference), [Shivek Khurana](https://shivekkhurana.com/blog/sqlite-in-production/) ("not very significant"), and the broader SQLite community.
+The second is `aggressive`, which I configured with `sync=OFF` and 25K chunks expecting it to win. It came second-from-last at 3,243 r/s. I sacrificed durability for nothing. Forward Email [found the same thing](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide): `sync=OFF` is sometimes slower than NORMAL because the WAL machinery is different, not just absent. Shivek Khurana [calls the difference "not very significant"](https://shivekkhurana.com/blog/sqlite-in-production/). It is not.
 
-**Pool size is irrelevant.** pool_3, pool_5, pool_8: 3,445 / 3,574 / 3,573 r/s. SQLite is single-writer regardless of how many connections you open. QueuePool serializes writes at the application level — functionally identical to the [single-writer architecture](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) that every production deployment converges on.
+The third is pool size. `pool_3`, `pool_5`, `pool_8`: 3,445 / 3,574 / 3,573. Under 4% spread. SQLite is single-writer no matter how many connections you open. SQLAlchemy's QueuePool just serialises writes at the application layer, which is functionally identical to the [single-writer architecture](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) every production SQLite deployment converges on.
 
-**Baseline wins.** 5K chunks, default PRAGMAs, pool_size=5. Best throughput-to-resource ratio: 3,802 r/s with only 195 MB RSS vs 790 MB for chunk_1000 (4× the memory for 0.5% more throughput).
+Baseline wins on the throughput-per-resource ratio. 5K chunks, default PRAGMAs, pool of 5. 3,802 r/s using only 195 MB of RSS. `chunk_1000` ekes out 0.5% more throughput but uses 4× the memory. Not a trade I am taking.
 
 ---
 
-## Benchmark 2: ORM vs Raw SQL <a id="benchmark-2-orm-vs-raw-sql"></a>
+## Benchmark 2: ORM vs raw SQL
 
-**Question**: How much throughput does the ORM leave on the table?
-
-**Answer**: 18–24×.
-
-### Results
-
-| Method | Scale | Throughput | Duration | p99 Latency | Peak RSS |
-|--------|-------|-----------|----------|-------------|----------|
+| Method | Scale | Throughput | Duration | p99 | Peak RSS |
+|--------|-------|-----------|----------|-----|----------|
 | ORM | 10M | 3,696 r/s | 45.1 min | 1,492 ms | 177 MB |
 | ORM | 50M | 3,682 r/s | 226.3 min | 1,563 ms | 177 MB |
-| **Raw executemany** | **10M** | **87,893 r/s** | **1.9 min** | **478 ms** | **155 MB** |
-| **Raw executemany** | **50M** | **65,742 r/s** | **12.7 min** | **853 ms** | **188 MB** |
+| Raw `executemany` | 10M | 87,893 r/s | 1.9 min | 478 ms | 155 MB |
+| Raw `executemany` | 50M | 65,742 r/s | 12.7 min | 853 ms | 188 MB |
 
-### Speedup
+23.8× at 10M. 17.9× at 50M. Three and a half hours of wall time turn into thirteen minutes.
 
-| Scale | ORM | Raw | Speedup | Time Saved |
-|-------|-----|-----|---------|------------|
-| 10M | 3,696 r/s | 87,893 r/s | **23.8×** | 43 min |
-| 50M | 3,682 r/s | 65,742 r/s | **17.9×** | 213 min (3.5 hrs) |
+### Where the ORM time goes
 
-### Where the Time Goes
+Every row through SQLAlchemy goes through this:
 
-The ORM does *a lot* per row:
+```mermaid
+flowchart TD
+    A[Python dict] --> B[Object instantiation<br/>BenchRow&#40;**row&#41;]
+    B --> C[Attribute instrumentation<br/>change tracking wrapper]
+    C --> D[Identity map lookup<br/>does this PK already exist?]
+    D --> E[Unit-of-work registration]
+    E --> F[SQL compilation<br/>cached, but still parsed]
+    F --> G[Type marshalling<br/>Python types → DB types]
+    G --> H[Session bookkeeping<br/>flush ordering, cascades]
+    H --> I[dbapi cursor.execute&#40;&#41;]
+    I --> J[SQLite C engine]
+    style B fill:#fee
+    style C fill:#fee
+    style D fill:#fee
+    style E fill:#fee
+    style F fill:#fee
+    style G fill:#fee
+    style H fill:#fee
+```
 
-1. **Object instantiation** — creates a Python object for each row
-2. **Attribute instrumentation** — wraps each attribute for change tracking
-3. **Identity map lookup** — checks if this primary key already exists in the session
-4. **Unit-of-work tracking** — registers the object for flush
-5. **SQL compilation** — generates parameterized SQL (cached, but still overhead)
-6. **Type marshalling** — converts Python types to DB types through SQLAlchemy's type system
-7. **Session bookkeeping** — maintains flush ordering, cascades, relationships
+Raw `executemany` does this:
 
-Raw `executemany` skips all of this. It hands tuples directly to the C-level sqlite3 driver, which hands them to the C-level SQLite engine. Two layers instead of seven.
+```mermaid
+flowchart TD
+    A[Python dict] --> K[Tuple conversion]
+    K --> I[dbapi cursor.executemany&#40;&#41;]
+    I --> J[SQLite C engine]
+```
 
-### Scaling Behavior
+Two layers, seven gone. The seven aren't free. Every step in red is a Python attribute access, a dict lookup, a function call, something that the JIT cannot inline because of how SQLAlchemy is structured. On a one-shot insert, it's invisible. On 10 million rows, it's 43 minutes.
 
-ORM throughput is **perfectly flat**: 3,696 r/s at 10M, 3,682 r/s at 50M. CPU-bound on Python object overhead — I/O doesn't factor in.
+### Scaling behaviour, both paths
 
-Raw throughput **degrades at scale**: 87,893 r/s at 10M → 65,742 r/s at 50M (25% drop). Now I/O matters — the database file grows from 3.8 GB to 19.5 GB. B-tree pages split, WAL checkpoints take longer, fsync costs accumulate. This is SQLite's actual scaling curve, invisible behind the ORM ceiling.
+ORM throughput is flat. 3,696 r/s at 10M. 3,682 r/s at 50M. I/O doesn't get a vote because the ORM is busy.
+
+Raw throughput degrades at scale, which is interesting. 87,893 r/s at 10M, 65,742 r/s at 50M. That is a 25% drop. The database file grew from 3.8 GB to 19.5 GB, the B-tree got deeper, WAL checkpoints got more expensive. This is SQLite's actual I/O scaling curve. The ORM never gets close enough to it to see it.
 
 ---
 
-## Key Finding: Chunk Size Controls Latency, Not Throughput <a id="key-finding-chunk-size"></a>
+## Chunk size controls latency, not throughput
 
-This was the most actionable result from the config sweep.
+Of all the things I tuned, chunk size was the only one that mattered, and not for the reason I expected.
 
-| Chunk Size | Throughput | p99 Latency | Ratio |
-|-----------|-----------|-------------|-------|
+| Chunk size | Throughput | p99 | Ratio |
+|-----------|-----------|-----|-------|
 | 1,000 | 3,821 r/s | 313 ms | 1.0× |
 | 5,000 | 3,673 r/s | 1,500 ms | 4.8× |
 | 10,000 | 3,621 r/s | 2,887 ms | 9.2× |
 | 25,000 | 3,262 r/s | 8,490 ms | 27.1× |
 | 50,000 | 3,045 r/s | 20,508 ms | 65.5× |
 
-**p99 scales linearly with chunk size.** 50× larger chunks → 66× worse p99. Meanwhile, throughput drops only 20%.
+p99 scales linearly with chunk size. 50× larger chunks, 66× worse p99. Throughput moves 20%.
 
-**Why?** Each chunk is a single transaction. Larger transactions hold the write lock longer, block WAL checkpoints longer, and create larger memory allocations. The SQLite write lock is exclusive — a 20-second transaction means other writers wait 20 seconds.
+Each chunk is one transaction. Larger transactions hold the write lock longer, block WAL checkpoints longer, allocate more memory. The SQLite write lock is exclusive. A 20-second transaction means every other writer waits 20 seconds.
 
-**Production implication:** Use the smallest chunk size your throughput requirements allow. 1K–5K is the sweet spot. You get ~3,800 r/s either way, but your p99 drops from 20 seconds to 300 milliseconds.
+So: use the smallest chunks your throughput requirement allows. 1K to 5K is the sweet spot. You get ~3,800 r/s either way, and your p99 drops from 20 seconds to 300 milliseconds.
 
 ---
 
-## Full Data: Scaling Progression Per Config <a id="scaling-progression"></a>
+## The full data nobody usually shows
 
-The 10M-row table above is the endpoint. The story is the *flatness* — ORM throughput barely moves from 3M to 10M for any config. SQLite's actual I/O scaling curve never gets a chance to matter.
+The 10M table is the endpoint. The story is the flatness, which you can only see if you look at how throughput evolved during the run.
 
-### Cumulative Throughput Across Checkpoints
+### Cumulative throughput at each checkpoint
 
-| Config | @3M | @5M | @10M | Delta (3M→10M) |
-|--------|-----|-----|------|----------------|
-| aggressive   | 3,232 | 3,219 | 3,243 | +0.3% |
-| baseline     | 3,760 | 3,761 | 3,802 | +1.1% |
-| chunk_1000   | 3,871 | 3,854 | 3,821 | -1.3% |
-| chunk_5000   | 3,734 | 3,715 | 3,673 | -1.6% |
-| chunk_10000  | 3,640 | 3,625 | 3,621 | -0.5% |
-| chunk_25000  | 3,384 | 3,349 | 3,262 | -3.6% |
-| chunk_50000  | 2,966 | 3,009 | 3,045 | +2.7% |
-| optimized    | 3,640 | 3,605 | 3,576 | -1.8% |
-| pool_3       | 3,472 | 3,463 | 3,445 | -0.8% |
-| pool_5       | 3,570 | 3,577 | 3,574 | +0.1% |
-| pool_8       | 3,598 | 3,588 | 3,573 | -0.7% |
+| Config | @3M | @5M | @10M | Δ (3M→10M) |
+|--------|-----|-----|------|------------|
+| aggressive | 3,232 | 3,219 | 3,243 | +0.3% |
+| baseline | 3,760 | 3,761 | 3,802 | +1.1% |
+| chunk_1000 | 3,871 | 3,854 | 3,821 | -1.3% |
+| chunk_5000 | 3,734 | 3,715 | 3,673 | -1.6% |
+| chunk_10000 | 3,640 | 3,625 | 3,621 | -0.5% |
+| chunk_25000 | 3,384 | 3,349 | 3,262 | -3.6% |
+| chunk_50000 | 2,966 | 3,009 | 3,045 | +2.7% |
+| optimized | 3,640 | 3,605 | 3,576 | -1.8% |
+| pool_3 | 3,472 | 3,463 | 3,445 | -0.8% |
+| pool_5 | 3,570 | 3,577 | 3,574 | +0.1% |
+| pool_8 | 3,598 | 3,588 | 3,573 | -0.7% |
 
-**No config moves more than ±3.6% from 3M to 10M.** Every config is flat. Whatever overhead the ORM imposes at row 1 imposes at row 10,000,000.
+No config moved more than ±3.6% from 3M to 10M. Every single one is flat. Whatever overhead the ORM imposes at row one, it imposes at row ten million.
 
-### Segment Throughput (Rate During Each 0→3M, 3M→5M, 5M→10M Window)
+This is not how databases normally behave. Most B-tree workloads degrade at scale because the tree gets deeper, fewer pages fit in cache, fsync takes longer. None of that mattered here. The ORM was dominating so completely that SQLite's actual scaling curve never showed up.
+
+### Per-segment throughput
 
 | Config | 0→3M | 3M→5M | 5M→10M |
 |--------|------|-------|--------|
-| baseline    | 3,760 | 3,762 | 3,844 |
-| chunk_1000  | 3,871 | 3,828 | 3,789 |
+| baseline | 3,760 | 3,762 | 3,844 |
+| chunk_1000 | 3,871 | 3,828 | 3,789 |
 | chunk_50000 | 2,966 | 3,076 | 3,081 |
 
-The 5M→10M window is sometimes *faster* than 0→3M (filesystem cache warm, no cold-start cost). No degradation. SQLite I/O never becomes the bottleneck because the ORM is too slow to reach it.
+The 5M→10M segment is sometimes faster than 0→3M. Filesystem cache is warm by then, no cold-start cost. The ORM is so far from being I/O-bound that even SQLite's I/O improvements show up positively.
 
-### p99 Latency Across Checkpoints
+### p99 at each checkpoint
 
 | Config | @3M | @5M | @10M |
 |--------|-----|-----|------|
-| chunk_1000  |    312ms |    312ms |    313ms |
-| baseline    |  1,403ms |  1,410ms |  1,418ms |
-| chunk_5000  |  1,463ms |  1,536ms |  1,500ms |
-| pool_5      |  3,005ms |  2,847ms |  2,960ms |
-| chunk_10000 |  2,887ms |  2,887ms |  2,887ms |
-| optimized   |  3,039ms |  2,903ms |  2,982ms |
-| chunk_25000 |  7,529ms |  7,710ms |  8,490ms |
-| aggressive  |  8,764ms |  8,536ms |  8,536ms |
-| chunk_50000 | 20,647ms | 16,492ms | 20,508ms |
+| chunk_1000 | 312 ms | 312 ms | 313 ms |
+| baseline | 1,403 ms | 1,410 ms | 1,418 ms |
+| chunk_5000 | 1,463 ms | 1,536 ms | 1,500 ms |
+| pool_5 | 3,005 ms | 2,847 ms | 2,960 ms |
+| chunk_10000 | 2,887 ms | 2,887 ms | 2,887 ms |
+| optimized | 3,039 ms | 2,903 ms | 2,982 ms |
+| chunk_25000 | 7,529 ms | 7,710 ms | 8,490 ms |
+| aggressive | 8,764 ms | 8,536 ms | 8,536 ms |
+| chunk_50000 | 20,647 ms | 16,492 ms | 20,508 ms |
 
-p99 is also flat. Whatever your p99 looks like at 3M is what it looks like at 10M. This is unusual for a database — most B-tree workloads degrade at scale. The ORM is dominating so completely that you never see SQLite's actual scaling curve.
+p99 is flat too. Whatever your p99 looks like at 3M, that is what it looks like at 10M. Your latency budget is set by your chunk size, full stop.
 
----
-
-## Full Data: Before/After With All Fields <a id="full-before-after"></a>
+### Before / after with every field
 
 | Field | ORM @ 10M | ORM @ 50M | Raw @ 10M | Raw @ 50M |
 |-------|-----------|-----------|-----------|-----------|
 | Throughput | 3,696 r/s | 3,682 r/s | 87,893 r/s | 65,742 r/s |
-| Duration | 2,705 s (45.1 min) | 13,581 s (3.8 hrs) | 114 s (1.9 min) | 761 s (12.7 min) |
+| Duration | 2,705 s | 13,581 s | 114 s | 761 s |
 | Batch count | 2,000 | 8,000 | 200 | 800 |
-| batch p50 | 1,320 ms | 1,324 ms | 424 ms | 652 ms |
-| batch p95 | 1,424 ms | 1,434 ms | 470 ms | 830 ms |
-| batch p99 | 1,492 ms | 1,563 ms | 478 ms | 853 ms |
-| batch avg | 1,324 ms | 1,330 ms | 424 ms | 659 ms |
+| Batch p50 | 1,320 ms | 1,324 ms | 424 ms | 652 ms |
+| Batch p95 | 1,424 ms | 1,434 ms | 470 ms | 830 ms |
+| Batch p99 | 1,492 ms | 1,563 ms | 478 ms | 853 ms |
+| Batch avg | 1,324 ms | 1,330 ms | 424 ms | 659 ms |
 | Peak RSS | 177 MB | 177 MB | 155 MB | 188 MB |
-| DB size on disk | 3.5 GB | 17.8 GB | 3.9 GB | 19.5 GB |
-| Segment throughput (10M→50M only) | — | 3,678 r/s | — | 61,846 r/s |
+| DB size | 3.5 GB | 17.8 GB | 3.9 GB | 19.5 GB |
+| Segment throughput (10M→50M) | n/a | 3,678 r/s | n/a | 61,846 r/s |
 
-### Observations from the Full Table
+A few things jump out.
 
-**ORM memory is flat at 177MB regardless of scale.** ORM streams through chunks; no accumulation. The 5× DB size growth (3.5GB → 17.8GB) has zero memory cost. Validates the streaming approach.
+ORM memory is flat at 177 MB regardless of scale. We're streaming through chunks, no accumulation. The 5× DB size growth costs zero memory. The streaming approach is validated.
 
-**Raw memory grows modestly (155MB → 188MB).** Larger chunk sizes (50K vs 5K) mean larger Python tuple lists held briefly in RAM. Still trivial.
+Raw memory grows modestly, 155 to 188 MB. Larger chunks (50K vs 5K) hold larger tuple lists briefly. Trivial.
 
-**Raw throughput degradation at scale is real.** Segment 10M→50M throughput drops to 61,846 r/s vs 87,893 for the first 10M. ~30% drop. This is SQLite's actual I/O cost — B-tree depth, page splits, WAL checkpoint cost. **Invisible behind the ORM ceiling at 3,700 r/s either way.**
+The raw 10M→50M segment ran at 61,846 r/s versus 87,893 r/s for the first 10M. That 30% drop is SQLite's actual I/O cost showing through: B-tree depth, page splits, WAL checkpoint time. Completely invisible behind the ORM ceiling, which was at 3,700 r/s either way.
 
-**ORM p99 is 3.1× worse than raw at 10M, and gets worse at scale** (1,492 → 1,563 ms vs 478 → 853 ms). Even the ORM's better baseline can't keep p99 stable.
+ORM p99 is 3.1× worse than raw at 10M and gets worse with scale (1,492 → 1,563 ms versus 478 → 853 ms). Even the ORM's own baseline cannot keep p99 stable.
 
-**DB size differs slightly between paths.** ORM produces 3,518 MB at 10M; raw produces 3,851 MB. Both correct — slight differences come from page-fill heuristics and WAL checkpoint timing. Functionally identical data.
+DB sizes differ slightly between paths (3,518 MB ORM vs 3,851 MB raw at 10M). Both are correct. Page-fill heuristics and WAL checkpoint timing diverge slightly. Functionally identical data.
 
 ---
 
-## How Our Numbers Compare to the Industry <a id="industry-comparison"></a>
+## How this lines up with the rest of the internet
 
-### Raw SQLite Write Throughput (No ORM)
+### Raw SQLite write throughput
 
 | Source | Hardware | Throughput | Notes |
 |--------|----------|-----------|-------|
-| [Marending (2024)](https://marending.dev/notes/sqlite-benchmarks/) | M1 Mac | 113,684 w/s | WAL + sync=NORMAL, mixed 80/20 → 197,012 ops/s |
+| [Marending (2024)](https://marending.dev/notes/sqlite-benchmarks/) | M1 Mac | 113,684 w/s | WAL + sync=NORMAL, mixed 80/20 hit 197,012 ops/s |
 | [Anders Murphy (2025)](https://andersmurphy.com/2025/12/02/100000-tps-over-a-billion-rows-the-unreasonable-effectiveness-of-sqlite.html) | M1 Pro 16GB | 121,922 TPS | Dynamic batching, 1B rows |
 | [Anders Murphy (2025)](https://andersmurphy.com/2025/12/02/100000-tps-over-a-billion-rows-the-unreasonable-effectiveness-of-sqlite.html) | M1 Pro 16GB | 44,096 TPS | No batching, 1B rows |
-| **Our data** | **Linux x86 NVMe** | **87,893 r/s** | **Python executemany @ 10M (UUID PK + 4-col upsert)** |
-| [Marending (2024)](https://marending.dev/notes/sqlite-benchmarks/) | Linux x86 (Hetzner CPX31) | 80,145 w/s | WAL + sync=NORMAL |
-| [tenthousandmeters](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) | Not specified | 72,769 ops/s | 1KB records, single-threaded, sync=NORMAL |
+| **Our data** | **Linux x86 NVMe** | **87,893 r/s** | **Python executemany @ 10M, UUID PK + 4-col upsert** |
+| [Marending](https://marending.dev/notes/sqlite-benchmarks/) | Linux x86 Hetzner CPX31 | 80,145 w/s | WAL + sync=NORMAL |
+| [tenthousandmeters](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) | Not specified | 72,769 ops/s | 1KB records, single-threaded |
 | **Our data** | **Linux x86 NVMe** | **65,742 r/s** | **Python executemany @ 50M** |
 | [Evan Schwartz](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) | Not specified | 60,061 r/s | Single-writer connection |
-| [Marending (2024)](https://marending.dev/notes/sqlite-benchmarks/) | Linux ARM (Hetzner CAX31) | 46,512 w/s | WAL + sync=NORMAL |
+| [Marending](https://marending.dev/notes/sqlite-benchmarks/) | Linux ARM Hetzner CAX31 | 46,512 w/s | WAL + sync=NORMAL |
 | [Shivek Khurana](https://shivekkhurana.com/blog/sqlite-in-production/) | i9 MacBook 32GB | 15,576 w/s | 128 workers, WAL mode |
 | [Forward Email](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) | Node.js v20 | 11,800 inserts/s | wal_autocheckpoint=1000 |
 | [Forward Email](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) | Node.js v20 | 10,548 inserts/s | Production baseline |
 
-Our raw path (65K–88K r/s) sits in the middle of the published range. Single-writer Python executemany on commodity NVMe matches what the ecosystem reports for similar hardware.
+My raw numbers sit in the middle. 65K to 88K rows per second on commodity NVMe through Python is what the ecosystem reports for similar hardware. Nothing exotic going on.
 
-### ORM Overhead Across Languages and Drivers
+### ORM overhead across stacks
 
-| Source | Stack | Raw | ORM/Slow Path | Overhead |
-|--------|-------|-----|---------------|----------|
-| **Our data** | **Python/SQLAlchemy 2.0/SQLite** | **87,893** | **3,696** | **23.8×** |
-| **Our data @ 50M** | **Python/SQLAlchemy 2.0/SQLite** | **65,742** | **3,682** | **17.9×** |
-| [SQLAlchemy bulk benchmarks](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG (100K rows) | Core insert (40×) | `session.add()` loop | 40× |
-| [SQLAlchemy bulk benchmarks](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG (100K rows) | Core insert (15×) | `bulk_save_objects` | 15× |
-| [SQLAlchemy bulk benchmarks](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG (100K rows) | PG `COPY` (240×) | `session.add()` loop | 240× |
+| Source | Stack | Raw | ORM | Overhead |
+|--------|-------|-----|-----|----------|
+| **Our data** | **Python/SQLAlchemy 2.0/SQLite @ 10M** | **87,893** | **3,696** | **23.8×** |
+| **Our data** | **Python/SQLAlchemy 2.0/SQLite @ 50M** | **65,742** | **3,682** | **17.9×** |
+| [SQLAlchemy bulk benchmarks](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG | Core insert | `session.add()` loop | 40× |
+| [Same](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG | Core insert | `bulk_save_objects` | 15× |
+| [Same](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) | Python/SQLAlchemy/PG | PG `COPY` | `session.add()` loop | 240× |
 | [Evan Schwartz](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) | Rust/sqlx | 60,061 | 2,586 (50-conn pool) | 23× |
-| [remusao](https://remusao.github.io/posts/few-tips-sqlite-perf.html) | Python/sqlite3 | 625K r/s (executemany) | 370K r/s (execute loop) | 1.7× |
+| [remusao](https://remusao.github.io/posts/few-tips-sqlite-perf.html) | Python/sqlite3 | 625K r/s | `execute` loop | 1.7× |
 
-The 17–40× ORM tax is consistent across stacks. The much larger 240× gap with Postgres COPY shows what's possible when both ORM **and** the Python driver are bypassed.
+The 17–40× tax on bulk operations through an ORM is consistent across stacks. The 240× COPY gap shows what happens when you bypass both the ORM and the Python driver. Worth flagging.
 
-### Production SQLite Deployments at Scale
+### Production deployments at scale
 
-| Company | Scale | Architecture | Notable Choice | Source |
-|---------|-------|-------------|----------------|--------|
-| Expensify | 4M QPS, 10B rows | Custom Bedrock layer, bare metal 192 cores | Modified SQLite (disabled POSIX locks, deterministic RANDOM) | [Blog](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server) |
-| 37signals (ONCE) | 1000s of installs | Per-customer SQLite, Rails 8 | Solid adapters (cache, queue, cable) | [DHH](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required) |
-| Kent C. Dodds | 6 regions, global | LiteFS on Fly.io | Postgres cluster → SQLite migration | [Blog](https://kentcdodds.com/blog/i-migrated-from-a-postgres-cluster-to-distributed-sqlite-with-litefs) |
-| Cloudflare D1 | Edge, global | SQLite + Workers | P99 8ms reads, 500–2K writes/sec | [Blog](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j) |
-| Turso | Embedded replicas | SQLite + libSQL replication | 624µs read latency, 40µs connection | [Blog](https://turso.tech/blog/local-first-cloud-connected-sqlite-with-turso-embedded-replicas) |
-| Ben Johnson / Litestream | Sub-MS queries | SQLite + WAL replication to S3 | 10–20µs per query, 50–100× faster than intra-region Postgres | [Blog](https://fly.io/blog/all-in-on-sqlite-litestream/) |
-| extensionpay.com | ~120M req/month | $14 DigitalOcean droplet | 3+ years SQLite + Litestream → Backblaze B2 | [HN](https://news.ycombinator.com/item?id=39955288) |
-| Glench (HN) | Production SaaS | Single $14 droplet | Memory mapping was biggest perf gain | [HN](https://news.ycombinator.com/item?id=39955288) |
-| tazu (HN) | Mid-six-figure SaaS | 95% reads / 5% writes | Separate reader pool (DEFERRED) + single writer (IMMEDIATE) | [HN](https://news.ycombinator.com/item?id=39955288) |
-| hruk (HN) | 8-figure ARR | SQLite + Litestream on EC2 | ~250µs insert latency on EBS | [HN](https://news.ycombinator.com/item?id=39955288) |
+| Company | Scale | Architecture | Notable choice |
+|---------|-------|-------------|----------------|
+| [Expensify](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server) | 4M QPS, 10B rows | Custom Bedrock layer, bare metal 192 cores | Modified SQLite (disabled POSIX locks) |
+| [37signals (ONCE)](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required) | 1000s of installs | Per-customer SQLite, Rails 8 | Solid adapters (cache, queue, cable) |
+| [Kent C. Dodds](https://kentcdodds.com/blog/i-migrated-from-a-postgres-cluster-to-distributed-sqlite-with-litefs) | 6 regions | LiteFS on Fly.io | Postgres cluster → SQLite |
+| [Cloudflare D1](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j) | Edge, global | SQLite + Workers | 8 ms P99 reads, 500–2K writes/s |
+| [Turso](https://turso.tech/blog/local-first-cloud-connected-sqlite-with-turso-embedded-replicas) | Embedded replicas | SQLite + libSQL | 624 µs reads, 40 µs connections |
+| [Litestream / Ben Johnson](https://fly.io/blog/all-in-on-sqlite-litestream/) | Sub-ms queries | SQLite + WAL replication to S3 | 10–20 µs per query, 50–100× faster than intra-region Postgres |
+| [extensionpay.com](https://news.ycombinator.com/item?id=39955288) | ~120M req/month | $14 DigitalOcean droplet | 3+ years on SQLite + Litestream to B2 |
+| [Glench (HN)](https://news.ycombinator.com/item?id=39955288) | Production SaaS | Single $14 droplet | Memory mapping was biggest perf gain |
+| [tazu (HN)](https://news.ycombinator.com/item?id=39955288) | Mid-six-figure SaaS | 95% reads / 5% writes | Separate reader pool + single writer |
+| [hruk (HN)](https://news.ycombinator.com/item?id=39955288) | 8-figure ARR | SQLite + Litestream on EC2 | ~250 µs insert latency on EBS |
 
-### Synchronous Mode: NORMAL vs OFF vs FULL
+Some of these are extreme. Expensify is doing 4 million QPS on a custom SQLite fork running on a single $30K box. Most are not. Glench is doing 120 million requests a month on a $14 droplet. The interesting thing is the architectural convergence, which I'll come back to.
+
+### Sync mode, cross-referenced
 
 | Source | sync=OFF | sync=NORMAL | sync=FULL/EXTRA | Conclusion |
 |--------|----------|-------------|-----------------|------------|
-| **Our data (aggressive vs baseline)** | 3,243 r/s | 3,802 r/s | not measured | **NORMAL wins via ORM** |
-| [Forward Email (Node.js inserts)](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) | 10,017 | 10,548 | 3,495 (EXTRA) | OFF *slower* than NORMAL; EXTRA 3× slower |
+| **Our data (aggressive vs baseline)** | 3,243 r/s | 3,802 r/s | not measured | NORMAL wins via ORM |
+| [Forward Email (Node.js)](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) | 10,017 | 10,548 | 3,495 (EXTRA) | OFF slower than NORMAL; EXTRA 3× slower |
 | [tenthousandmeters](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) | not measured | 72,769 | 29,000 (FULL) | NORMAL 2.5× faster than FULL |
 | [Shivek Khurana](https://shivekkhurana.com/blog/sqlite-in-production/) | not measured | "not significant" | "not significant" | -6% to +10% variance |
 
-Consensus: **NORMAL is correct. OFF saves nothing meaningful. FULL/EXTRA can be 2–3× slower.**
+Consensus: NORMAL. OFF saves nothing meaningful. FULL and EXTRA can be 2 to 3× slower. The folklore that OFF is a free win for performance is just wrong.
 
-### Connection Pool Architecture
+### Connection pool architecture
 
-| Source | Architecture | Throughput | Notes |
-|--------|-------------|-----------|-------|
+| Source | Architecture | Throughput | Note |
+|--------|-------------|-----------|------|
 | **Our data (pool_3 / pool_5 / pool_8)** | QueuePool 3–8 | 3,445 / 3,574 / 3,573 r/s | <4% spread |
 | [Evan Schwartz](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) | 50-conn pool | 2,586 r/s | p99 = 182 seconds |
-| [Evan Schwartz](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) | Single writer | 60,061 r/s | 23× faster, p99 = 82ms |
+| [Evan Schwartz](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) | Single writer | 60,061 r/s | 23× faster, p99 = 82 ms |
 | [Stephen Margheim](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/) | Reader pool + IMMEDIATE writer | Zero errors up to 16 concurrent | Default DEFERRED fails at 4+ |
-| [tenthousandmeters](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) | App-level mutex | 56K–66K r/s stable | Stable up to 256 threads |
+| [tenthousandmeters](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) | App-level mutex | 56K–66K r/s stable | Holds up to 256 threads |
 
-The convergence is clear: **serialize writes at the application layer.** Whether via QueuePool, app-level mutex, or single-writer connection, all production deployments arrive at the same answer.
+Everyone arrives at the same answer eventually: serialise writes at the application layer. Whether that's QueuePool, an app mutex, or a single-writer connection, the architecture is identical in spirit.
 
 ---
 
-## The Production Config Everyone Agrees On <a id="production-config"></a>
+## The production config everyone agrees on
 
-Cross-referencing our benchmark data with [OneUptime](https://oneuptime.com/blog/post/2026-02-02-sqlite-production-setup/view), [Forward Email](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide), [Shivek Khurana](https://shivekkhurana.com/blog/sqlite-in-production/), [Stephen Margheim](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/), and the [SQLite documentation](https://sqlite.org/wal.html):
+If you cross-reference [OneUptime](https://oneuptime.com/blog/post/2026-02-02-sqlite-production-setup/view), [Forward Email](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide), [Shivek Khurana](https://shivekkhurana.com/blog/sqlite-in-production/), [Stephen Margheim](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/), the [SQLite docs](https://sqlite.org/wal.html), and my own data, the config converges:
 
 ```sql
-PRAGMA journal_mode = WAL;           -- Concurrent reads + writes
-PRAGMA synchronous = NORMAL;         -- Safe for WAL mode, 2-13% faster than FULL
-PRAGMA busy_timeout = 5000;          -- 5s minimum; 30s for high-contention apps
-PRAGMA cache_size = -64000;          -- 64MB; our tests show diminishing returns beyond this
-PRAGMA mmap_size = 268435456;        -- 256MB; improves read-heavy workloads
-PRAGMA temp_store = MEMORY;          -- Faster temp tables (monitor RSS for large queries)
-PRAGMA foreign_keys = ON;            -- Data integrity
-PRAGMA auto_vacuum = INCREMENTAL;    -- Reclaim space without full rebuild
-PRAGMA wal_autocheckpoint = 1000;    -- Default, ~4MB WAL before checkpoint
+PRAGMA journal_mode = WAL;          -- Concurrent reads + writes
+PRAGMA synchronous = NORMAL;        -- Safe for WAL mode, 2-13% faster than FULL
+PRAGMA busy_timeout = 5000;         -- 5s minimum; 30s for high-contention apps
+PRAGMA cache_size = -64000;         -- 64MB; diminishing returns beyond this
+PRAGMA mmap_size = 268435456;       -- 256MB; helps read-heavy workloads
+PRAGMA temp_store = MEMORY;         -- Faster temp tables (watch RSS on big VACUUMs)
+PRAGMA foreign_keys = ON;           -- Data integrity
+PRAGMA auto_vacuum = INCREMENTAL;   -- Reclaim space without full rebuild
+PRAGMA wal_autocheckpoint = 1000;   -- Default, ~4MB WAL before checkpoint
 ```
 
-### Connection Architecture
+### Connection architecture
 
+```mermaid
+flowchart LR
+    A[Application] -->|all writes| W[Writer pool<br/>1 connection<br/>BEGIN IMMEDIATE]
+    A -->|all reads| R[Reader pool<br/>N connections<br/>N = CPU cores]
+    W --> DB[(SQLite<br/>WAL mode)]
+    R --> DB
+    style W fill:#fef3c7
+    style R fill:#dbeafe
 ```
-┌─────────────────────────┐
-│     Application         │
-├─────────────────────────┤
-│  Writer Pool (1 conn)   │──── All INSERT/UPDATE/DELETE
-│  Reader Pool (N conns)  │──── All SELECT (N = CPU cores)
-└─────────────────────────┘
-```
 
-Every production deployment we studied converges on **single-writer + multi-reader**. This eliminates write contention at the application level. SQLAlchemy's QueuePool with pool_size=5 achieves the same effect — it serializes writes through the pool, which is why we saw zero errors across all configurations.
+Every production deployment I looked at converged on single-writer plus multi-reader. SQLAlchemy's QueuePool with `pool_size=5` does the same thing in practice, which is why I saw zero errors across 110 million rows.
 
-### What Doesn't Matter (When Using an ORM)
+### What does not move the needle when you're using an ORM
 
 | PRAGMA | Effect on ORM throughput | Why |
 |--------|------------------------|-----|
 | synchronous = OFF vs NORMAL | < 5% | ORM overhead dominates I/O savings |
-| cache_size 4MB vs 64MB | < 3% | B-tree lookups are cheap vs Python object creation |
-| mmap_size 0 vs 256MB | < 2% | Reads are fast; writes are ORM-bound |
+| cache_size 4MB vs 64MB | < 3% | B-tree lookups cheap vs Python object creation |
+| mmap_size 0 vs 256MB | < 2% | Reads are fast, writes are ORM-bound |
 | pool_size 3 vs 8 | < 4% | Single-writer means pool size is irrelevant for writes |
+
+If you skipped to this table, here is the summary: nothing on the left changes the right.
 
 ---
 
-## When to Bypass Your ORM <a id="when-to-bypass-orm"></a>
+## When to throw the ORM out
 
-The ORM path is fine for most operations. Bypass it when:
+The ORM is fine for most things. CRUD, reads, validation, relationship traversal, normal application work. The fast path is for the hot bulk routes. Use this decision tree:
 
-| Scenario | ORM | Raw SQL | Recommendation |
-|----------|-----|---------|----------------|
-| CRUD (< 1K rows) | Good enough | Premature optimization | Use ORM |
-| Bulk load (10K–1M rows) | 2–5 min/M | 7 sec/M | Use raw executemany |
-| Bulk load (1M–100M rows) | 45 min/10M | 1.9 min/10M | **Must** use raw SQL |
-| Real-time ingest (> 1K r/s sustained) | Ceiling at 3.8K | Headroom to 88K | Use raw SQL |
-| Upsert-heavy workloads | Works but slow | 18× faster | Use raw SQL |
+```mermaid
+flowchart TD
+    Q{Bulk write?}
+    Q -->|No, single row CRUD| ORM[Use ORM]
+    Q -->|Yes| C{How many rows?}
+    C -->|< 1K| ORM
+    C -->|1K-10K| OK{Sustained > 1K r/s<br/>required?}
+    OK -->|No| ORM
+    OK -->|Yes| RAW[Raw executemany]
+    C -->|10K-1M| RAW
+    C -->|> 1M| RAW2[Raw executemany<br/>required]
+    style ORM fill:#dbeafe
+    style RAW fill:#fef3c7
+    style RAW2 fill:#fecaca
+```
 
-### The Hybrid Approach
+| Scenario | ORM | Raw SQL | What to do |
+|----------|-----|---------|------------|
+| CRUD, < 1K rows | Good enough | Premature | ORM |
+| Bulk load 10K–1M rows | 2–5 min per million | 7 sec per million | Raw `executemany` |
+| Bulk load 1M–100M rows | 45 min per 10M | 1.9 min per 10M | Raw `executemany` |
+| Sustained > 1K r/s ingest | Ceiling at 3.8K | Headroom to 88K | Raw `executemany` |
+| Upsert-heavy workloads | Works but slow | 18× faster | Raw `executemany` |
 
-Keep your ORM for reads, validation, and normal CRUD. Add a raw SQL fast-path for bulk operations:
+### Hybrid repositories
+
+The pattern I now use in production: ORM for normal CRUD, a raw fast path for bulk.
 
 ```python
 class BenchRepository:
     def create(self, data: dict) -> BenchRow:
-        """Normal ORM path for single creates."""
+        # Single-row CRUD. ORM is fine.
         obj = BenchRow(**data)
         self.db.add(obj)
         self.db.flush()
         return obj
 
     def bulk_insert_turbo(self, rows: Iterable[dict]) -> int:
-        """Raw SQL path for bulk inserts. 23× faster than ORM."""
+        # Bulk path. 23× faster than the ORM version.
         raw_conn = self.db.connection().connection.dbapi_connection
         cursor = raw_conn.cursor()
         tuples = [self._dict_to_tuple(r) for r in rows]
@@ -513,155 +525,126 @@ class BenchRepository:
         return len(tuples)
 ```
 
-This is the pattern we use in production. ORM for correctness, raw SQL for throughput.
+ORM for correctness. Raw SQL for throughput. Both in the same repository, both committed to the same session, both touching the same tables.
 
 ---
 
-## Surprising Findings From the Literature <a id="surprising-findings"></a>
+## Six things I did not expect
 
-### 1. `temp_store=MEMORY` Can Be Slower Than Disk
+### `temp_store = MEMORY` can be slower than disk
 
-Forward Email [found](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) that disk-based temp storage outperformed memory in their benchmarks. Large VACUUM operations can consume 10+ GB with memory temp storage, causing OOM or swap thrashing. Benchmark before assuming "memory is faster."
+[Forward Email's measurements](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) showed disk-based temp storage beating memory. Large VACUUM operations can chew through 10+ GB with memory temp storage and either OOM or thrash swap. The folklore that "memory is faster" is not always true. Measure.
 
-### 2. SQLite's Default Busy Handler Uses Exponential Backoff — And It's Bad
+### SQLite's default busy handler uses exponential backoff, and it is bad
 
-Stephen Margheim [demonstrated](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/) that SQLite's built-in busy handler penalizes long-waiting queries. A uniform 1ms retry interval outperforms it significantly — P99.99 drops from seconds to ~500ms.
+[Stephen Margheim showed](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/) that uniform 1ms retry intervals beat SQLite's built-in exponential backoff. P99.99 drops from seconds to ~500 ms. The default backoff penalises long-waiting queries, which is the wrong end of the distribution to penalise.
 
-### 3. WAL Mode Is *Slower* at Low Concurrency
+### WAL is slower than DELETE at low concurrency
 
-Shivek Khurana's [benchmarks](https://shivekkhurana.com/blog/sqlite-in-production/) show WAL is **43% slower** than DELETE journal mode at 1 worker. WAL only breaks even at 4 workers and pulls ahead at 8+. If you have a single-threaded batch job, consider rollback journal.
+[Khurana's data](https://shivekkhurana.com/blog/sqlite-in-production/) shows WAL is 43% slower than DELETE at 1 worker. It only breaks even at 4 workers and starts winning at 8. If you have a single-threaded batch job, the rollback journal is faster. Counterintuitive, but the WAL machinery has overhead you only amortise across concurrent operations.
 
-### 4. Connection Pool Size Can Destroy Write Performance
+### A 50-connection pool is 23× slower than a single writer
 
-Evan Schwartz [measured](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) a **23× throughput drop** with 50-connection pool vs single writer (2,586 vs 60,061 r/s). Pool contention creates the same overhead pattern as ORM — pseudo-serialization with scheduling waste.
+[Evan Schwartz measured 2,586 vs 60,061 r/s](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/). The 50-connection pool creates pseudo-serialisation with scheduling overhead. The single writer just goes. Same throughput pattern as ORM, different layer: software making sure writers don't collide, but doing it badly.
 
-### 5. Node.js Version Matters More Than SQLite Config
+### Node.js version matters more than SQLite config
 
-Forward Email found Node.js v24 had a **57% read regression** vs v20 on the same SQLite database with the same PRAGMAs. Runtime overhead can dwarf database tuning — another instance of the "application layer dominates" pattern we measured with Python/SQLAlchemy.
+Forward Email reported Node v24 reads were 57% slower than v20 on the same database with the same PRAGMAs. The application layer dominates so completely that a runtime upgrade can dwarf years of database tuning. I cannot help feeling vindicated by this.
 
-### 6. Write Degradation at 10M–100M Rows Is Real
+### Write degradation at 10M–100M rows is real
 
-Multiple [HN reports](https://news.ycombinator.com/item?id=39955288) confirm write performance degrades when tables hit 8–9 figures. Our data shows this: raw executemany dropped 25% from 10M (87,893 r/s) to 50M (65,742 r/s). B-tree depth, page splits, and WAL checkpoint costs all increase with scale.
+[Multiple HN reports](https://news.ycombinator.com/item?id=39955288) mention writes degrading once tables hit 8–9 figures. My raw numbers show it: 87,893 r/s at 10M, 65,742 r/s at 50M, a 25% drop driven by B-tree depth, page splits, and WAL checkpoint cost. Through the ORM, you never see it. The ORM is too slow to reach the curve.
 
 ---
 
-## Reproducing These Results <a id="reproducing"></a>
+## Reproducing this
 
-### Requirements
-
-- Python 3.11+
-- SQLAlchemy 2.0+
-- NVMe storage (spinning disk will bottleneck at different points)
-- 8+ GB RAM
-- Linux (for consistent filesystem behavior)
-
-### Running the Benchmarks
+If you want to run the same benchmarks, the [repo is open source](https://github.com/TanayK07/sqlite-orm-bench).
 
 ```bash
-# Clone the repo
-git clone https://github.com/<org>/sqlite-orm-benchmark.git
-cd sqlite-orm-benchmark
+git clone https://github.com/TanayK07/sqlite-orm-bench.git
+cd sqlite-orm-bench
+pip install -e .
 
-# Install dependencies
-pip install -r requirements.txt
+# Smoke test, ~5 seconds
+python -m sqlite_bench.before_after --scales 10K --mode both
 
-# Config sweep: 11 configs × 10M rows (~5.5 hours)
-python -m benchmarks.scale_benchmark \
-    --scales 3M,5M,10M \
-    --configs all \
-    --output-dir results/scale
+# ORM vs raw at 10M, ~50 minutes
+python -m sqlite_bench.before_after --scales 10M --mode both
 
-# Before/After: ORM vs raw at 10M and 50M (~4.5 hours)
-python -m benchmarks.before_after \
-    --scales 10M,50M \
-    --mode both \
-    --output-dir results/before_after
+# Full 11-config sweep at 10M, ~5.5 hours
+python -m sqlite_bench.scale_benchmark --scales 3M,5M,10M --configs all
 
-# Resume after interruption
-python -m benchmarks.scale_benchmark \
-    --resume results/scale/results.json
-
-# Generate HTML report
-python -m benchmarks.report results/scale/results.json
+# Pick up after a crash
+python -m sqlite_bench.scale_benchmark \
+  --scales 3M,5M,10M --configs all \
+  --resume results/scale/results.json
 ```
 
-### What Gets Measured
+Requirements: Python 3.11+, SQLAlchemy 2.0+, NVMe storage, 8+ GB RAM, Linux.
 
-- **Throughput**: rows/second (cumulative and per-segment)
-- **Latency**: p50, p95, p99 per batch
-- **Memory**: peak RSS via `/proc/self/status`
-- **Database size**: file size on disk
-- **WAL size**: WAL file growth
-- **Errors**: lock errors, interface errors, total errors
+The harness measures throughput cumulative and per-segment, p50/p95/p99 per batch, peak RSS, DB and WAL sizes, and error counts. Results go to JSON with `--resume` support, because long runs crash and the laptop will close its lid.
 
-All results saved to JSON with crash-recovery support.
+If you run it on different hardware, please open an issue. I'm collecting a cross-hardware table.
 
 ---
 
-## Conclusions
+## What I would do differently if I were starting today
 
-### 1. The ORM Is the Bottleneck, Not SQLite
+Six conclusions, all from the data above.
 
-Across 11 configurations, ORM throughput never exceeded 3,821 r/s. Raw executemany on the same hardware hit 87,893 r/s. SQLite can absorb 23× more writes than the ORM can produce. Every minute you spend tuning PRAGMAs for an ORM-heavy workload is wasted.
+**The ORM is the bottleneck. Not SQLite.** Across 11 configurations, my ORM throughput never broke 3,821 r/s. Raw `executemany` on the same hardware hit 87,893. SQLite can absorb 23× more writes than my ORM can produce. Hours spent tuning PRAGMAs against an ORM-bound workload are hours you do not get back.
 
-### 2. PRAGMA Tuning Is Irrelevant for ORM Workloads
+**PRAGMA tuning is irrelevant for ORM-bound workloads.** `sync=OFF`, 64 MB cache, 256 MB mmap, 8-connection pool, none of it moves the needle more than 26%. The ORM's per-row work (object creation, attribute instrumentation, identity map, SQL compilation) consumes the CPU budget before SQLite gets a chance to be slow.
 
-sync=OFF, 64MB cache, 256MB mmap, 8-connection pool — none of it moves the needle more than 26%. The ORM's per-row overhead (object creation, attribute tracking, identity maps, SQL compilation) consumes the CPU budget before I/O becomes a factor.
+**Chunk size is the only tunable that matters for latency.** p99 scales 66× across chunk sizes (313 ms at 1K, 20,508 ms at 50K), and throughput stays within 20%. One knob. Turn it down. 1K to 5K chunks gives you predictable latency without giving up throughput.
 
-### 3. Chunk Size Is the Only Tunable That Matters for Latency
+**The baseline config wins.** `sync=NORMAL`, default cache, `pool=5`, `chunk=5000`. No exotic PRAGMAs needed. This matches the production consensus across OneUptime, Forward Email, Litestream, Rails 8, and SQLite's own documentation. It is also what I would have shipped if I had skipped the benchmarks entirely. Annoying, but useful to know.
 
-p99 scales **66× across chunk sizes** (313ms at 1K to 20,508ms at 50K) while throughput stays within 20%. This is the one knob worth turning. Use 1K–5K chunks for predictable latency.
+**Raw SQL degrades gracefully at scale.** 87,893 r/s at 10M, 65,742 r/s at 50M, a 25% drop. This is SQLite's actual I/O scaling curve: B-tree depth, page splits, WAL checkpoints. Real, predictable, manageable. The ORM masks it entirely because the ORM never gets close to the I/O boundary.
 
-### 4. The Baseline Config Wins
-
-`sync=NORMAL`, `cache=-4096`, `pool=5`, `chunk=5000`. No exotic PRAGMAs needed. This matches the production consensus across OneUptime, Forward Email, Litestream, Rails 8, and SQLite's own documentation.
-
-### 5. Raw SQL Degrades Gracefully at Scale
-
-87,893 r/s at 10M → 65,742 r/s at 50M (25% drop). This is SQLite's actual I/O scaling curve — B-tree depth, page splits, WAL checkpoints. The ORM masks this entirely because it never gets close to the I/O boundary.
-
-### 6. QueuePool Eliminates Concurrency Errors
-
-Zero errors across 110 million rows, 11 configurations, 2 methods, 2 scales. QueuePool serializes writes at the application level, matching the [single-writer architecture](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) that every production SQLite deployment converges on.
+**QueuePool eliminates concurrency errors.** Zero errors across 110 million rows, 11 configurations, 2 paths, 2 scales. QueuePool serialises writes at the application layer, matching the [single-writer pattern](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) every production deployment converges on. The fact that I never saw a `database is locked` is itself a result.
 
 ---
 
-## References <a id="references"></a>
+## References
 
-### Production Case Studies
-1. **Expensify** — [Scaling SQLite to 4M QPS on a Single Server](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server) — 10B rows, 192 cores, custom Bedrock layer
-2. **Ben Johnson / Litestream** — [All-In on Server-Side SQLite](https://fly.io/blog/all-in-on-sqlite-litestream/) — 10–20μs per query, 50–100× faster than intra-region Postgres
-3. **DHH / 37signals** — [Rails 8: No PaaS Required](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required) — SQLite as Rails 8 default, per-customer database pattern
-4. **Kent C. Dodds** — [Why You Should Probably Be Using SQLite](https://www.epicweb.dev/why-you-should-probably-be-using-sqlite) — Postgres cluster → distributed SQLite migration
-5. **Cloudflare D1** — [SQLite at the Edge After 6 Months](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j) — P99 8ms reads, 40–60% latency reduction
-6. **OneUptime** — [SQLite Production Setup](https://oneuptime.com/blog/post/2026-02-02-sqlite-production-setup/view) — Production configuration guide with monitoring thresholds
-7. **Turso** — [Embedded Replicas](https://turso.tech/blog/local-first-cloud-connected-sqlite-with-turso-embedded-replicas) — 624μs read latency, 40μs connection time
+### Production case studies
+1. **Expensify**, [Scaling SQLite to 4M QPS on a Single Server](https://use.expensify.com/blog/scaling-sqlite-to-4m-qps-on-a-single-server). 10B rows, 192 cores, custom Bedrock layer.
+2. **Ben Johnson / Litestream**, [All-In on Server-Side SQLite](https://fly.io/blog/all-in-on-sqlite-litestream/). 10–20 µs per query, 50–100× faster than intra-region Postgres.
+3. **DHH / 37signals**, [Rails 8: No PaaS Required](https://rubyonrails.org/2024/11/7/rails-8-no-paas-required). SQLite as Rails 8 default, per-customer DB pattern.
+4. **Kent C. Dodds**, [Why You Should Probably Be Using SQLite](https://www.epicweb.dev/why-you-should-probably-be-using-sqlite). Postgres cluster to distributed SQLite migration.
+5. **Cloudflare D1**, [SQLite at the Edge After 6 Months](https://dev.to/whoffagents/cloudflare-d1-sqlite-at-the-edge-after-6-months-in-production-551j). P99 8 ms reads, 40–60% latency reduction.
+6. **OneUptime**, [SQLite Production Setup](https://oneuptime.com/blog/post/2026-02-02-sqlite-production-setup/view). Production configuration with monitoring thresholds.
+7. **Turso**, [Embedded Replicas](https://turso.tech/blog/local-first-cloud-connected-sqlite-with-turso-embedded-replicas). 624 µs read latency, 40 µs connection time.
 
-### Benchmarks & Technical Analysis
-8. **Shivek Khurana** — [SQLite in Production: A Real-World Benchmark](https://shivekkhurana.com/blog/sqlite-in-production/) — WAL vs DELETE, sync modes, concurrency scaling
-9. **Anders Murphy** — [100K TPS Over a Billion Rows](https://andersmurphy.com/2025/12/02/100000-tps-over-a-billion-rows-the-unreasonable-effectiveness-of-sqlite.html) — Dynamic batching, SQLite vs Postgres
-10. **Marending** — [How Fast Is SQLite?](https://marending.dev/notes/sqlite-benchmarks/) — Cross-platform write throughput (46K–113K w/s)
-11. **tenthousandmeters.com** — [SQLite Concurrent Writes](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/) — Multi-threaded scaling, app-level mutex pattern
-12. **Evan Schwartz** — [Your SQLite Connection Pool Might Be Ruining Your Write Performance](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/) — Single-writer = 23× faster than 50-connection pool
-13. **Forward Email** — [SQLite Performance Optimization PRAGMA Guide](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide) — sync=OFF no better than NORMAL, temp_store=MEMORY can be slower
-14. **Stephen Margheim** — [SQLite on Rails: Optimal Performance](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/) — IMMEDIATE transactions, uniform busy handler retry
+### Benchmarks and technical analysis
+8. **Shivek Khurana**, [SQLite in Production: A Real-World Benchmark](https://shivekkhurana.com/blog/sqlite-in-production/). WAL vs DELETE, sync modes, concurrency scaling.
+9. **Anders Murphy**, [100K TPS Over a Billion Rows](https://andersmurphy.com/2025/12/02/100000-tps-over-a-billion-rows-the-unreasonable-effectiveness-of-sqlite.html). Dynamic batching, SQLite vs Postgres.
+10. **Marending**, [How Fast Is SQLite?](https://marending.dev/notes/sqlite-benchmarks/). Cross-platform write throughput (46K–113K w/s).
+11. **tenthousandmeters.com**, [SQLite Concurrent Writes](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/). Multi-threaded scaling, app-level mutex pattern.
+12. **Evan Schwartz**, [Your SQLite Connection Pool Might Be Ruining Your Write Performance](https://emschwartz.me/psa-your-sqlite-connection-pool-might-be-ruining-your-write-performance/). Single-writer 23× faster than 50-connection pool.
+13. **Forward Email**, [SQLite Performance Optimization PRAGMA Guide](https://forwardemail.net/en/blog/docs/sqlite-performance-optimization-pragma-chacha20-production-guide). sync=OFF no better than NORMAL; temp_store=MEMORY can be slower.
+14. **Stephen Margheim**, [SQLite on Rails: Optimal Performance](https://fractaledmind.com/2024/04/15/sqlite-on-rails-the-how-and-why-of-optimal-performance/). IMMEDIATE transactions, uniform busy handler retry.
 
-### SQLite Documentation
-15. **SQLite Official** — [Appropriate Uses for SQLite](https://sqlite.org/whentouse.html)
-16. **SQLite Official** — [Write-Ahead Logging](https://sqlite.org/wal.html)
-17. **SQLite Official** — [Speed Comparison](https://sqlite.org/speed.html) — Transaction batching = 10–20× improvement
+### SQLite documentation
+15. **SQLite Official**, [Appropriate Uses for SQLite](https://sqlite.org/whentouse.html).
+16. **SQLite Official**, [Write-Ahead Logging](https://sqlite.org/wal.html).
+17. **SQLite Official**, [Speed Comparison](https://sqlite.org/speed.html). Transaction batching is the 10–20× improvement.
 
-### ORM Performance
-18. **SQLAlchemy** — [Performance FAQ](https://docs.sqlalchemy.org/en/20/faq/performance.html)
-19. **SQLAlchemy Bulk Insert Benchmarks** — [Fast Bulk Insert](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html) — Core insert 40× faster than session.add()
+### ORM performance
+18. **SQLAlchemy**, [Performance FAQ](https://docs.sqlalchemy.org/en/20/faq/performance.html).
+19. **SQLAlchemy Bulk Insert Benchmarks**, [Fast Bulk Insert](https://tutorials.technology/tutorials/Fast-bulk-insert-with-sqlalchemy.html). Core insert 40× faster than session.add().
 
-### Community Reports
-20. **Hacker News** — [SQLite in Production Discussion](https://news.ycombinator.com/item?id=39955288) — Multiple production deployments, 8-figure ARR on SQLite
+### Community reports
+20. **Hacker News**, [SQLite in Production Discussion](https://news.ycombinator.com/item?id=39955288). Multiple production deployments, 8-figure ARR on SQLite.
 
 ---
 
-## About
+## About this work
 
-This benchmark was produced while optimizing a high-throughput spatial data ingestion pipeline running SQLite on edge hardware. The database ingested millions of structured measurements per job, and the ORM ceiling was the forcing function that led to the raw fast-path methods and this analysis.
+I started running these benchmarks while building a high-throughput spatial data ingestion pipeline on SQLite, on edge hardware, with structured measurements arriving by the million. The ORM ceiling was the forcing function. I needed to know whether I could fix it with PRAGMA tuning or whether I had to bypass SQLAlchemy entirely.
 
-**Hardware context matters.** Our NVMe results will differ from EBS, spinning disk, or eMMC. The relative findings (ORM overhead ratio, config irrelevance, chunk size vs latency) should hold across storage tiers, but absolute numbers will vary.
+The answer turned out to be the latter, and the benchmark suite I built to get there became this repo.
+
+Hardware context matters, of course. My NVMe results will differ from EBS, spinning disk, or eMMC. The relative findings (the ORM ratio, the config irrelevance, the chunk size vs latency story) should hold across storage tiers. The absolute numbers will not. If you run this on different hardware, [open an issue](https://github.com/TanayK07/sqlite-orm-bench/issues), and I'll add your numbers to the comparison table.
