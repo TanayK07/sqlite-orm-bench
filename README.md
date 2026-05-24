@@ -4,10 +4,10 @@
 
 A benchmark harness that quantifies the **ORM tax** on SQLite write performance at 10M–50M row scale. Run an 11-configuration sweep, or compare SQLAlchemy ORM vs raw `executemany` head-to-head. Reproduce our results on your hardware.
 
-[![Read on dev.to](https://img.shields.io/badge/dev.to-read_article-black.svg?logo=dev.to)](https://dev.to/tanayk07/your-orm-is-the-bottleneck-11l2)
+[![Read on Hashnode](https://img.shields.io/badge/hashnode-read_article-2962FF.svg?logo=hashnode)](https://tanaykedia.hashnode.dev/your-orm-is-the-bottleneck-sqlite-write-benchmark)
+[![Read on dev.to](https://img.shields.io/badge/dev.to-mirror-black.svg?logo=dev.to)](https://dev.to/tanayk07/your-orm-is-the-bottleneck-11l2)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Article on GitHub](https://img.shields.io/badge/article-ARTICLE.md-green.svg)](ARTICLE.md)
 
 ---
 
