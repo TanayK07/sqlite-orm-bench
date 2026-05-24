@@ -218,34 +218,27 @@ Every row through SQLAlchemy goes through this:
 
 ```mermaid
 flowchart TD
-    A[Python dict] --> B[Object instantiation<br/>BenchRow&#40;**row&#41;]
-    B --> C[Attribute instrumentation<br/>change tracking wrapper]
-    C --> D[Identity map lookup<br/>does this PK already exist?]
-    D --> E[Unit-of-work registration]
-    E --> F[SQL compilation<br/>cached, but still parsed]
-    F --> G[Type marshalling<br/>Python types → DB types]
-    G --> H[Session bookkeeping<br/>flush ordering, cascades]
-    H --> I[dbapi cursor.execute&#40;&#41;]
-    I --> J[SQLite C engine]
-    style B fill:#fee
-    style C fill:#fee
-    style D fill:#fee
-    style E fill:#fee
-    style F fill:#fee
-    style G fill:#fee
-    style H fill:#fee
+    A["Python dict"] --> B["Object instantiation<br/>BenchRow(**row)"]
+    B --> C["Attribute instrumentation<br/>change tracking wrapper"]
+    C --> D["Identity map lookup<br/>does this PK already exist?"]
+    D --> E["Unit-of-work registration"]
+    E --> F["SQL compilation<br/>cached, but still parsed"]
+    F --> G["Type marshalling<br/>Python types to DB types"]
+    G --> H["Session bookkeeping<br/>flush ordering, cascades"]
+    H --> I["dbapi cursor.execute()"]
+    I --> J["SQLite C engine"]
 ```
 
 Raw `executemany` does this:
 
 ```mermaid
 flowchart TD
-    A[Python dict] --> K[Tuple conversion]
-    K --> I[dbapi cursor.executemany&#40;&#41;]
-    I --> J[SQLite C engine]
+    A["Python dict"] --> K["Tuple conversion"]
+    K --> I["dbapi cursor.executemany()"]
+    I --> J["SQLite C engine"]
 ```
 
-Two layers, seven gone. The seven aren't free. Every step in red is a Python attribute access, a dict lookup, a function call, something that the JIT cannot inline because of how SQLAlchemy is structured. On a one-shot insert, it's invisible. On 10 million rows, it's 43 minutes.
+Two layers, seven gone. None of the seven are free. Each one is a Python attribute access, a dict lookup, a function call, something the JIT cannot inline because of how SQLAlchemy is structured. On a one-shot insert it is invisible. On 10 million rows it costs 43 minutes.
 
 ### Scaling behaviour, both paths
 
@@ -451,12 +444,10 @@ PRAGMA wal_autocheckpoint = 1000;   -- Default, ~4MB WAL before checkpoint
 
 ```mermaid
 flowchart LR
-    A[Application] -->|all writes| W[Writer pool<br/>1 connection<br/>BEGIN IMMEDIATE]
-    A -->|all reads| R[Reader pool<br/>N connections<br/>N = CPU cores]
-    W --> DB[(SQLite<br/>WAL mode)]
+    A["Application"] -->|all writes| W["Writer pool<br/>1 connection<br/>BEGIN IMMEDIATE"]
+    A -->|all reads| R["Reader pool<br/>N connections<br/>N = CPU cores"]
+    W --> DB[("SQLite<br/>WAL mode")]
     R --> DB
-    style W fill:#fef3c7
-    style R fill:#dbeafe
 ```
 
 Every production deployment I looked at converged on single-writer plus multi-reader. SQLAlchemy's QueuePool with `pool_size=5` does the same thing in practice, which is why I saw zero errors across 110 million rows.
@@ -480,18 +471,15 @@ The ORM is fine for most things. CRUD, reads, validation, relationship traversal
 
 ```mermaid
 flowchart TD
-    Q{Bulk write?}
-    Q -->|No, single row CRUD| ORM[Use ORM]
-    Q -->|Yes| C{How many rows?}
-    C -->|< 1K| ORM
-    C -->|1K-10K| OK{Sustained > 1K r/s<br/>required?}
-    OK -->|No| ORM
-    OK -->|Yes| RAW[Raw executemany]
-    C -->|10K-1M| RAW
-    C -->|> 1M| RAW2[Raw executemany<br/>required]
-    style ORM fill:#dbeafe
-    style RAW fill:#fef3c7
-    style RAW2 fill:#fecaca
+    Q{"Bulk write?"}
+    Q -->|"No, single row CRUD"| ORM["Use ORM"]
+    Q -->|"Yes"| C{"How many rows?"}
+    C -->|"under 1K"| ORM
+    C -->|"1K to 10K"| OK{"Sustained over 1K r/s<br/>required?"}
+    OK -->|"No"| ORM
+    OK -->|"Yes"| RAW["Raw executemany"]
+    C -->|"10K to 1M"| RAW
+    C -->|"over 1M"| RAW2["Raw executemany<br/>required"]
 ```
 
 | Scenario | ORM | Raw SQL | What to do |
